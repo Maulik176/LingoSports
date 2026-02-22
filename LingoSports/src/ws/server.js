@@ -5,6 +5,30 @@ import { wsArcject } from '../arcjet.js';
 //Maulik - Broadcast Functionality
 const matchSubscribers = new Map();
 
+function firstHeaderValue(headerValue) {
+  if (Array.isArray(headerValue)) return headerValue[0];
+  return headerValue;
+}
+
+function getClientIp(req) {
+  const xForwardedFor = firstHeaderValue(req.headers?.['x-forwarded-for']);
+  const forwardedIp = typeof xForwardedFor === 'string'
+    ? xForwardedFor.split(',')[0]?.trim()
+    : undefined;
+
+  return (
+    forwardedIp ||
+    firstHeaderValue(req.headers?.['x-real-ip']) ||
+    firstHeaderValue(req.headers?.['cf-connecting-ip']) ||
+    req.socket?.remoteAddress
+  );
+}
+
+function buildArcjetRequest(req) {
+  const ip = getClientIp(req);
+  return ip ? { ...req, ip } : req;
+}
+
 //function for users to subscribe to a match
 function subscribe(matchId, socket){
   if(!matchSubscribers.has(matchId)){
@@ -93,7 +117,7 @@ export function attachWebSocketServer(server) {
   wss.on('connection', async (socket, req) => {
     if (wsArcject) {
       try {
-        const decision = await wsArcject.protect(req);
+        const decision = await wsArcject.protect(buildArcjetRequest(req));
         if (decision.isDenied()) {
           const code = decision.reason.isRateLimit() ? 4001 : 4003;
           const reason = decision.reason.isRateLimit() ? 'Rate Limit Exceeded' : 'Access Denied';
@@ -101,9 +125,13 @@ export function attachWebSocketServer(server) {
           return;
         }
       } catch (error) {
+        if (error?.message?.includes('requested `ip` characteristic but the `ip` value was empty')) {
+          console.warn('Arcjet skipped websocket check due to missing client IP');
+        } else {
         console.error('ws connection error', error);
         socket.close(1011, 'Server Security Error');
         return;
+        }
       }
     }
 

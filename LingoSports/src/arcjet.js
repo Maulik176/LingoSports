@@ -42,12 +42,37 @@ export const wsArcject = arcjetKey ? arcjet({
   ],
 }) : null;
 
+function firstHeaderValue(headerValue) {
+  if (Array.isArray(headerValue)) return headerValue[0];
+  return headerValue;
+}
+
+function getClientIp(req) {
+  const xForwardedFor = firstHeaderValue(req.headers?.['x-forwarded-for']);
+  const forwardedIp = typeof xForwardedFor === 'string'
+    ? xForwardedFor.split(',')[0]?.trim()
+    : undefined;
+
+  return (
+    req.ip ||
+    forwardedIp ||
+    firstHeaderValue(req.headers?.['x-real-ip']) ||
+    firstHeaderValue(req.headers?.['cf-connecting-ip']) ||
+    req.socket?.remoteAddress
+  );
+}
+
+function buildArcjetRequest(req) {
+  const ip = getClientIp(req);
+  return ip ? { ...req, ip } : req;
+}
+
 export function securityMiddleware() {
   return async (req, res, next) => {
     if (!httpArcject) return next();
 
     try {
-      const decision = await httpArcject.protect(req);
+      const decision = await httpArcject.protect(buildArcjetRequest(req));
 
       if (decision.isDenied()) {
         if (decision.reason.isRateLimit()) {
@@ -69,6 +94,10 @@ export function securityMiddleware() {
 
       return next();
     } catch (error) {
+      if (error?.message?.includes('requested `ip` characteristic but the `ip` value was empty')) {
+        console.warn('Arcjet skipped request due to missing client IP');
+        return next();
+      }
       console.error('Arcjet protection failed:', error);
       return res.status(503).json({ error: 'Service Unavailable' });
     }

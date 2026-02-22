@@ -1,3 +1,6 @@
+import AgentAPI from 'apminsight';
+AgentAPI.config();
+
 import express from 'express';
 import http from 'http';
 import { matchRouter } from './routes/matches.js';
@@ -10,12 +13,18 @@ const HOST = process.env.HOST || '0.0.0.0';
 const app = express();
 const server = http.createServer(app);
 
+app.set('trust proxy', true);
 app.use(express.json()); //middleware
-app.use(securityMiddleware());
 
 app.get('/', (req, res) => {
   res.send('Hello from Express server!');
 });
+
+app.get('/healthz', (req, res) => {
+  res.status(200).json({ status: 'ok' });
+});
+
+app.use(securityMiddleware());
 
 app.use('/matches', matchRouter);
 app.use('/matches/:id/commentary', commentaryRouter);
