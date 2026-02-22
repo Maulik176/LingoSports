@@ -46,7 +46,7 @@ Since the Neon CLI and MCP server do interact with database resources, it's impo
 - Use MCP server or CLI to get the connection string
 - Store it in `.env` as `DATABASE_URL`:
 
-```
+```bash
 DATABASE_URL=postgresql://user:password@host/database
 ```
 

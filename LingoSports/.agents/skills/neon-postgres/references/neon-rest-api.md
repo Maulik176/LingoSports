@@ -10,7 +10,7 @@ The full [OpenAPI spec](https://neon.com/api_spec/release/v2.json) is available 
 
 ## Base URL
 
-```
+```text
 https://console.neon.tech/api/v2/
 ```
 
@@ -18,7 +18,7 @@ https://console.neon.tech/api/v2/
 
 Include a Neon API key in every request:
 
-```
+```http
 Authorization: Bearer $NEON_API_KEY
 ```
 
