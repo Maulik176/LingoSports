@@ -2,7 +2,7 @@ import express from 'express';
 import { matchRouter } from './routes/matches.js';
 
 const app = express();
-const PORT = 8000;
+const PORT = Number(process.env.PORT) || 8000;
 
 app.use(express.json());
 

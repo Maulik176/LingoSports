@@ -22,17 +22,16 @@ matchRouter.get('/', async (req, res) => {
 
   try {
     const data = await db
-    .select()
-    .from(matches)
-    .orderBy((desc(matches.createdAt)))
-    .limit(limit)
-
-    res.json({data}); 
+      .select()
+      .from(matches)
+      .orderBy(desc(matches.createdAt))
+      .limit(limit);
+    return res.json({ data });
   } catch (error) {
-    return res.status(500).json({
-        error: 'Failed to list matches',
-        details: JSON.stringify(error),
-      });
+    console.error('Failed to list matches:', error);
+    const payload = { error: 'Failed to list matches' };
+    if (process.env.NODE_ENV !== 'production') payload.details = error?.message;
+    return res.status(500).json(payload);
   }
 });
 
@@ -63,9 +62,9 @@ matchRouter.post('/', async (req, res) => {
 
     return res.status(201).json({ data: event });
   } catch (error) {
-    return res.status(500).json({
-      error: 'Failed to create match',
-      details: JSON.stringify(error),
-    });
+    console.error('Failed to create match:', error);
+    const payload = { error: 'Failed to create match' };
+    if (process.env.NODE_ENV !== 'production') payload.details = error?.message;
+    return res.status(500).json(payload);
   }
 });

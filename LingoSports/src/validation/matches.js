@@ -1,7 +1,11 @@
 import { z } from 'zod';
 
+const ISO8601_REGEX =
+  /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}(\.\d{3})?(Z|[+-]\d{2}:?\d{2})?)?$/i;
+
 const isValidISODateString = (str) => {
   if (typeof str !== 'string') return false;
+  if (!ISO8601_REGEX.test(str)) return false;
   const date = new Date(str);
   return !Number.isNaN(date.getTime());
 };
