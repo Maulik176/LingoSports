@@ -71,7 +71,7 @@ If the app needs auth: use MCP server `provision_neon_auth` tool, then see `neon
 
 Check for existing ORM (Prisma, Drizzle, TypeORM). If none, ask if they want one. For Drizzle integration, see `neon-drizzle.md`.
 
-### 6. Schema Setup
+### 4. Schema Setup
 
 - Check for existing migration files or ORM schemas
 - If none: offer to create an example schema or design one together
