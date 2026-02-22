@@ -1,5 +1,11 @@
-import AgentAPI from 'apminsight';
-AgentAPI.config();
+if (process.env.APMINSIGHT_ENABLED === '1') {
+  try {
+    const { default: AgentAPI } = await import('apminsight');
+    AgentAPI.config();
+  } catch (error) {
+    console.warn('APM Insight is enabled but package is unavailable:', error?.message);
+  }
+}
 
 import express from 'express';
 import http from 'http';
@@ -24,7 +30,7 @@ app.get('/healthz', (req, res) => {
   res.status(200).json({ status: 'ok' });
 });
 
-app.use(securityMiddleware());
+//app.use(securityMiddleware());
 
 app.use('/matches', matchRouter);
 app.use('/matches/:id/commentary', commentaryRouter);
