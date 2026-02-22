@@ -9,7 +9,7 @@ See the [official Neon Auth docs](https://neon.com/docs/auth/overview.md) for co
 | Framework / Use Case    | Package                 | Notes                          |
 | ----------------------- | ----------------------- | ------------------------------ |
 | Next.js                 | `@neondatabase/auth`    | Server + client SDK            |
-| React SPA (Vite, etc)   | `@neondatabase/neon-js` | Client SDK + optional Data API |
+| React SPA (Vite, etc.)  | `@neondatabase/neon-js` | Client SDK + optional Data API |
 | Auth + Database queries | `@neondatabase/neon-js` | Full SDK                       |
 
 Both packages share auth exports (`@neondatabase/neon-js/auth/*` re-exports `@neondatabase/auth/*`).
