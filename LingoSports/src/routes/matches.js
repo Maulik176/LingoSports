@@ -5,6 +5,7 @@ import { createMatchSchema, listMatchesQuerySchema } from '../validation/matches
 import { getMatchStatus } from '../utils/match-status.js';
 import { desc } from 'drizzle-orm';
 
+
 export const matchRouter = Router();
 const MAX_LIMIT = 100;
 
@@ -59,6 +60,18 @@ matchRouter.post('/', async (req, res) => {
         status: getMatchStatus(startTime, endTime),
       })
       .returning();
+
+    try {
+      if (res.app.locals.broadCastMatchCreated) {
+        res.app.locals.broadCastMatchCreated(event);
+      }
+    } catch (broadcastError) {
+      const logError =
+        typeof res.app.locals?.logger?.error === 'function'
+          ? res.app.locals.logger.error.bind(res.app.locals.logger)
+          : console.error;
+      logError('Failed to broadcast match creation:', broadcastError);
+    }
 
     return res.status(201).json({ data: event });
   } catch (error) {
