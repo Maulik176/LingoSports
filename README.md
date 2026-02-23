@@ -2,7 +2,7 @@
 
 **Realtime Sports Engine with multilingual live commentary.**
 
-[YouTube Demo (Placeholder)](https://www.youtube.com/watch?v=YOUR_VIDEO_ID)
+[YouTube Demo]([https://www.youtube.com/watch?v=YOUR_VIDEO_ID](https://youtu.be/Q9C1z53ltOU))
 
 <img width="1434" height="798" alt="image" src="https://github.com/user-attachments/assets/4e0cfe5b-e447-47c5-9290-61302f37036b" />
 
