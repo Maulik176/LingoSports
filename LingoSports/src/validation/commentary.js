@@ -1,7 +1,16 @@
 import { z } from 'zod';
+import { QUALITY_VALUES, SUPPORTED_LOCALES } from '../lingo/locale-utils.js';
+
+const localeSchema = z.enum(SUPPORTED_LOCALES);
+const qualitySchema = z.enum(QUALITY_VALUES);
 
 export const listCommentaryQuerySchema = z.object({
   limit: z.coerce.number().int().positive().max(100).optional(),
+  locale: localeSchema.optional(),
+  quality: qualitySchema.optional(),
+  includeSource: z
+    .union([z.literal('0'), z.literal('1'), z.literal(0), z.literal(1)])
+    .optional(),
 });
 
 export const createCommentarySchema = z.object({
@@ -14,4 +23,8 @@ export const createCommentarySchema = z.object({
   message: z.string(),
   metadata: z.record(z.string(), z.any()).optional(),
   tags: z.array(z.string()).optional(),
+  sourceLocale: localeSchema.optional(),
+  quality: qualitySchema.optional(),
+  precompute: z.coerce.boolean().optional(),
+  includeGlobalFanView: z.coerce.boolean().optional(),
 });

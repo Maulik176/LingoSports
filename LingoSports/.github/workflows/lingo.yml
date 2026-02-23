@@ -1,0 +1,86 @@
+name: Lingo Localization
+
+on:
+  pull_request:
+    branches: ["**"]
+  push:
+    branches: ["main", "master"]
+  workflow_dispatch:
+    inputs:
+      create_pull_request:
+        description: "Create or update localization PR"
+        required: false
+        default: "true"
+
+jobs:
+  lingo-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate locale completeness
+        run: npm run locales:check
+
+      - name: Resolve Lingo API key
+        run: |
+          if [ -n "${{ secrets.LINGODOTDEV_API_KEY }}" ]; then
+            echo "LINGO_API_KEY=${{ secrets.LINGODOTDEV_API_KEY }}" >> "$GITHUB_ENV"
+          elif [ -n "${{ secrets.LINGO_API_KEY }}" ]; then
+            echo "LINGO_API_KEY=${{ secrets.LINGO_API_KEY }}" >> "$GITHUB_ENV"
+          else
+            echo "Missing LINGODOTDEV_API_KEY/LINGO_API_KEY secret" >&2
+            exit 1
+          fi
+
+      - name: Lingo frozen check
+        run: npx lingo.dev run --frozen --api-key "$LINGO_API_KEY"
+
+  lingo-bot-pr:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Resolve Lingo API key
+        run: |
+          if [ -n "${{ secrets.LINGODOTDEV_API_KEY }}" ]; then
+            echo "LINGO_API_KEY=${{ secrets.LINGODOTDEV_API_KEY }}" >> "$GITHUB_ENV"
+          elif [ -n "${{ secrets.LINGO_API_KEY }}" ]; then
+            echo "LINGO_API_KEY=${{ secrets.LINGO_API_KEY }}" >> "$GITHUB_ENV"
+          else
+            echo "Missing LINGODOTDEV_API_KEY/LINGO_API_KEY secret" >&2
+            exit 1
+          fi
+
+      - name: Generate translation PR via Lingo CI mode
+        run: |
+          npx lingo.dev ci \
+            --api-key "$LINGO_API_KEY" \
+            --pull-request "${{ github.event.inputs.create_pull_request || 'true' }}" \
+            --commit-message "feat: update translations via lingo.dev" \
+            --pull-request-title "feat: update translations via lingo.dev"

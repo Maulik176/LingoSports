@@ -1,9 +1,14 @@
 import { Router } from 'express';
 import { db } from '../db/db.js';
 import { matches } from '../db/schema.js';
-import { createMatchSchema, listMatchesQuerySchema } from '../validation/matches.js';
+import {
+  createMatchSchema,
+  listMatchesQuerySchema,
+  matchIdParamSchema,
+  updateScoreSchema,
+} from '../validation/matches.js';
 import { getMatchStatus } from '../utils/match-status.js';
-import { desc } from 'drizzle-orm';
+import { desc, eq } from 'drizzle-orm';
 
 
 export const matchRouter = Router();
@@ -31,7 +36,8 @@ matchRouter.get('/', async (req, res) => {
   } catch (error) {
     console.error('Failed to list matches:', error);
     const payload = { error: 'Failed to list matches' };
-    if (process.env.NODE_ENV !== 'production') payload.details = error?.message;
+    const details = error?.cause?.message ?? error?.message;
+    if (process.env.NODE_ENV !== 'production') payload.details = details;
     return res.status(500).json(payload);
   }
 });
@@ -77,7 +83,61 @@ matchRouter.post('/', async (req, res) => {
   } catch (error) {
     console.error('Failed to create match:', error);
     const payload = { error: 'Failed to create match' };
-    if (process.env.NODE_ENV !== 'production') payload.details = error?.message;
+    const details = error?.cause?.message ?? error?.message;
+    if (process.env.NODE_ENV !== 'production') payload.details = details;
+    return res.status(500).json(payload);
+  }
+});
+
+matchRouter.patch('/:id/score', async (req, res) => {
+  const parsedParams = matchIdParamSchema.safeParse(req.params);
+  if (!parsedParams.success) {
+    return res.status(400).json({
+      error: 'Invalid match id',
+      details: JSON.stringify(parsedParams.error),
+    });
+  }
+
+  const parsedBody = updateScoreSchema.safeParse(req.body);
+  if (!parsedBody.success) {
+    return res.status(400).json({
+      error: 'Invalid payload',
+      details: JSON.stringify(parsedBody.error),
+    });
+  }
+
+  try {
+    const [event] = await db
+      .update(matches)
+      .set({
+        homeScore: parsedBody.data.homeScore,
+        awayScore: parsedBody.data.awayScore,
+      })
+      .where(eq(matches.id, parsedParams.data.id))
+      .returning();
+
+    if (!event) {
+      return res.status(404).json({ error: 'Match not found' });
+    }
+
+    try {
+      if (res.app.locals.broadCastMatchUpdated) {
+        res.app.locals.broadCastMatchUpdated(event);
+      }
+    } catch (broadcastError) {
+      const logError =
+        typeof res.app.locals?.logger?.error === 'function'
+          ? res.app.locals.logger.error.bind(res.app.locals.logger)
+          : console.error;
+      logError('Failed to broadcast score update:', broadcastError);
+    }
+
+    return res.status(200).json({ data: event });
+  } catch (error) {
+    console.error('Failed to update score:', error);
+    const payload = { error: 'Failed to update score' };
+    const details = error?.cause?.message ?? error?.message;
+    if (process.env.NODE_ENV !== 'production') payload.details = details;
     return res.status(500).json(payload);
   }
 });

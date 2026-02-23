@@ -10,6 +10,9 @@ const arcjetMode =
     : process.env.ARCJET_ENV === 'development'
       ? 'DRY_RUN'
       : 'LIVE';
+const configuredFailOpen = process.env.ARCJET_FAIL_OPEN?.trim();
+export const isArcjetFailOpen =
+  configuredFailOpen == null ? arcjetMode === 'DRY_RUN' : configuredFailOpen !== '0';
 
 export const httpArcject = arcjetKey ? arcjet({
   key: arcjetKey,
@@ -63,8 +66,14 @@ function getClientIp(req) {
 }
 
 function buildArcjetRequest(req) {
+  const headers = { ...(req.headers || {}) };
+  const userAgent = firstHeaderValue(headers['user-agent']);
+  if (!userAgent) {
+    headers['user-agent'] = 'lingosports-http/unknown-client';
+  }
   const ip = getClientIp(req);
-  return ip ? { ...req, ip } : req;
+  const normalizedReq = { ...req, headers };
+  return ip ? { ...normalizedReq, ip } : normalizedReq;
 }
 
 export function securityMiddleware() {
@@ -75,6 +84,13 @@ export function securityMiddleware() {
       const decision = await httpArcject.protect(buildArcjetRequest(req));
 
       if (decision.isDenied()) {
+        if (isArcjetFailOpen) {
+          console.warn('Arcjet denied HTTP request but fail-open is enabled', {
+            path: req.path,
+            method: req.method,
+          });
+          return next();
+        }
         if (decision.reason.isRateLimit()) {
           return res.status(429).json({ error: 'Too many requests' });
         }
@@ -85,10 +101,24 @@ export function securityMiddleware() {
       }
 
       if (decision.ip?.isHosting?.()) {
+        if (isArcjetFailOpen) {
+          console.warn('Arcjet hosting-ip block bypassed by fail-open mode', {
+            path: req.path,
+            method: req.method,
+          });
+          return next();
+        }
         return res.status(403).json({ error: 'Forbidden' });
       }
 
       if (Array.isArray(decision.results) && decision.results.some(isSpoofedBot)) {
+        if (isArcjetFailOpen) {
+          console.warn('Arcjet spoofed-bot block bypassed by fail-open mode', {
+            path: req.path,
+            method: req.method,
+          });
+          return next();
+        }
         return res.status(403).json({ error: 'Forbidden' });
       }
 
@@ -96,6 +126,10 @@ export function securityMiddleware() {
     } catch (error) {
       if (error?.message?.includes('requested `ip` characteristic but the `ip` value was empty')) {
         console.warn('Arcjet skipped request due to missing client IP');
+        return next();
+      }
+      if (isArcjetFailOpen) {
+        console.warn('Arcjet protection error bypassed by fail-open mode:', error?.message || error);
         return next();
       }
       console.error('Arcjet protection failed:', error);

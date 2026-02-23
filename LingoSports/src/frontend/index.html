@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sportz | Realtime Sports Engine</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="hero-card">
+        <div>
+          <p class="eyebrow">Realtime Sports Engine</p>
+          <h1>Lingo Sports</h1>
+          <p class="subtitle">
+            Mulitlingual commentary and scores
+          </p>
+        </div>
+        <div id="connection-pill" class="connection-pill disconnected">
+          <span class="dot" aria-hidden="true"></span>
+          <span id="connection-text">CONNECTING</span>
+        </div>
+      </header>
+
+      <section class="workspace">
+        <section class="matches-panel">
+          <div class="section-header">
+            <h2>Current Matches</h2>
+            <div class="header-controls">
+              <label class="sport-filter-wrap" for="sport-filter">
+                <span class="sport-filter-label">Sport</span>
+                <select id="sport-filter" class="sport-filter-select">
+                  <option value="all">All Sports</option>
+                </select>
+              </label>
+              <span id="api-count" class="api-pill">API: 0</span>
+            </div>
+          </div>
+          <div id="matches-grid" class="matches-grid">
+            <div class="panel-placeholder">Loading matches...</div>
+          </div>
+        </section>
+
+        <aside class="commentary-panel">
+          <div class="commentary-header">
+            <h2>Live Commentary</h2>
+            <span class="realtime-pill">Real-time</span>
+          </div>
+          <div id="commentary-list" class="commentary-list">
+            <div class="panel-placeholder">
+              Select a match to start streaming commentary.
+            </div>
+          </div>
+        </aside>
+      </section>
+    </main>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
