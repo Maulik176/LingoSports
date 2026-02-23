@@ -2,8 +2,9 @@
 
 **Realtime Sports Engine with multilingual live commentary.**
 
-<img width="1434" height="798" alt="image" src="https://github.com/user-attachments/assets/4e0cfe5b-e447-47c5-9290-61302f37036b" />
+[YouTube Demo (Placeholder)](https://www.youtube.com/watch?v=YOUR_VIDEO_ID)
 
+<img width="1434" height="798" alt="image" src="https://github.com/user-attachments/assets/4e0cfe5b-e447-47c5-9290-61302f37036b" />
 
 LingoSports is a hackathon-ready platform that streams live sports events, updates scores in realtime, and localizes commentary into 8 languages using `lingo.dev`.
 
@@ -31,6 +32,21 @@ Most live sports apps are strong in realtime but weak in multilingual fan reach.
 - Translation metrics endpoint for coverage, latency, and cache-hit ratio
 - Seed/reset workflow for deterministic hackathon demos
 - Localization CI workflow with `lingo.dev`
+
+## Lingo Feature Usage Matrix (Judge View)
+
+| Lingo Feature | How We Use It | Where It Is Implemented | Judge Value |
+|---|---|---|---|
+| Runtime Translation Engine | Commentary is translated at runtime per subscriber locale and quality (`fast`/`standard`). | `src/lingo/engine.js`, `src/lingo/translate-commentary.js` | Demonstrates real AI-powered multilingual delivery, not static text swaps. |
+| Source Locale Recognition | When source locale is missing/uncertain, locale is recognized before translation. | `src/lingo/engine.js` (`recognizeLocale`), `src/lingo/translate-commentary.js` | Handles mixed-language inputs robustly in live flows. |
+| Multi-Locale Target Routing | Targets are configured as `en -> es, fr, de, hi, ar, ja, pt` and normalized consistently. | `src/lingo/locale-utils.js`, `i18n.json` | Proves deliberate global audience support with controlled locale policy. |
+| Precompute Translation Queue | New commentary can be precomputed for target locales in background workers. | `src/lingo/translate-commentary.js` (`schedulePrecomputeCommentaryTranslations`) | Reduces translation wait time during spikes and improves perceived realtime UX. |
+| On-Demand Translation Fallback | If precompute is unavailable, source text is delivered first, then translated update follows. | `src/lingo/translate-commentary.js`, `src/ws/server.js` (`commentary_translation_ready`) | Shows graceful degradation plus eventual consistency in realtime systems. |
+| Translation Caching | Translations are persisted and reused via cache-hit logic. | `src/lingo/cache.js`, table `commentary_translations` in `src/db/schema.js` | Improves performance/cost efficiency and validates production-minded design. |
+| Translation Telemetry | Every translation/cache/fallback event is logged for quality and ops visibility. | `src/lingo/cache.js` (`recordTranslationEvent`), `src/routes/lingo.js` (`/lingo/stats`) | Gives measurable proof of system behavior for judges. |
+| Lingo CLI for UI Localization | Locale files are generated/validated through Lingo CLI workflow. | `package.json` (`lingo:run`, `lingo:check`, `lingo:ci`), `apps/web/messages/*` | Demonstrates end-to-end localization workflow beyond backend translation only. |
+| CI Frozen Verification | CI fails if localization output is out of sync using frozen Lingo checks. | `.github/workflows/lingo.yml` (`npx lingo.dev run --frozen`) | Proves localization quality gates are enforced in CI/CD. |
+| CI Translation PR Automation | Manual workflow can run `lingo.dev ci` to generate/update translation PRs. | `.github/workflows/lingo.yml` (`workflow_dispatch`, `npx lingo.dev ci`) | Shows mature translation operations and repeatable release process. |
 
 ## Architecture
 
