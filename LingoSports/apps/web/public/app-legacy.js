@@ -133,6 +133,7 @@ const OPENAI_VOICE_AGENT_CONNECT_TIMEOUT_MS = 12000;
 const OPENAI_VOICE_AGENT_RESPONSE_TIMEOUT_MS = 18000;
 const OPENAI_AGENT_SESSION_TIMEOUT_MS = 10000;
 const OPENAI_TTS_REQUEST_TIMEOUT_MS = 10000;
+const JSON_FETCH_TIMEOUT_MS = 10000;
 const THEME_STORAGE_KEY = 'lingosports.theme';
 const LOCALE_STORAGE_KEY = 'lingosports.locale';
 const SUPPORTED_AUDIO_RATES = new Set([1, 1.25]);
@@ -1578,8 +1579,12 @@ function bindEvents() {
   });
 }
 
-async function fetchJson(url, init = {}) {
-  const response = await fetch(resolveApiUrl(url), init);
+async function fetchJson(url, init = {}, options = {}) {
+  const configuredTimeout = Number.parseInt(String(options.timeoutMs ?? JSON_FETCH_TIMEOUT_MS), 10);
+  const timeoutMs = Number.isFinite(configuredTimeout) && configuredTimeout > 0
+    ? configuredTimeout
+    : JSON_FETCH_TIMEOUT_MS;
+  const response = await fetchWithTimeout(resolveApiUrl(url), init, timeoutMs);
   if (!response.ok) {
     let message = `Request failed (${response.status})`;
     try {
@@ -2004,9 +2009,7 @@ function dedupeCommentaryEntries(entries) {
     const entryId = Number(entry?.id);
     const fallbackKey = `${entry?.createdAt || ''}:${entry?.sequence || ''}:${entry?.message || ''}`;
     const key = Number.isInteger(entryId) ? `id:${entryId}` : `fallback:${fallbackKey}`;
-    if (!deduped.has(key)) {
-      deduped.set(key, entry);
-    }
+    deduped.set(key, entry);
   }
   return Array.from(deduped.values());
 }

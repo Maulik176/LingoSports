@@ -27,6 +27,7 @@ const queuedKeys = new Set();
 let activeWorkers = 0;
 let droppedJobs = 0;
 let acceptingJobs = true;
+let isShuttingDown = false;
 let shutdownPromise = null;
 let signalHandlersRegistered = false;
 
@@ -118,15 +119,20 @@ async function processJob(job) {
 }
 
 function drainQueue() {
+  if (isShuttingDown) return;
   while (activeWorkers < BACKFILL_WORKER_CONCURRENCY && jobQueue.length > 0) {
+    if (isShuttingDown) return;
     const job = jobQueue.shift();
+    if (!job) return;
     activeWorkers += 1;
 
     void processJob(job)
       .finally(() => {
         activeWorkers = Math.max(0, activeWorkers - 1);
         queuedKeys.delete(job.key);
-        drainQueue();
+        if (!isShuttingDown) {
+          drainQueue();
+        }
       });
   }
 }
@@ -233,8 +239,8 @@ export async function shutdownBackfillQueue(options = {}) {
   );
 
   acceptingJobs = false;
+  isShuttingDown = true;
   shutdownPromise = (async () => {
-    await persistQueueSnapshot();
     const start = Date.now();
     while (activeWorkers > 0) {
       if (Date.now() - start >= timeoutMs) {
@@ -242,6 +248,7 @@ export async function shutdownBackfillQueue(options = {}) {
       }
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
+    await persistQueueSnapshot();
 
     return {
       drained: activeWorkers === 0,

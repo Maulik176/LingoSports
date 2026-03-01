@@ -4,6 +4,7 @@ import {
   createSpeechRequestSchema,
   createVoiceAgentSessionSchema,
 } from '../validation/audio.js';
+import { envBoolEnabled } from '../utils/env.js';
 
 const OPENAI_SPEECH_ENDPOINT = 'https://api.openai.com/v1/audio/speech';
 const OPENAI_REALTIME_CALLS_ENDPOINT = 'https://api.openai.com/v1/realtime/calls';
@@ -31,13 +32,11 @@ const HYPE_STYLE_INSTRUCTIONS = [
 export const audioRouter = Router();
 
 function isOpenAiTtsEnabled() {
-  const raw = String(process.env.OPENAI_TTS_ENABLED ?? '0').trim().toLowerCase();
-  return raw === '1' || raw === 'true';
+  return envBoolEnabled(process.env.OPENAI_TTS_ENABLED, false);
 }
 
 function isOpenAiVoiceAgentEnabled() {
-  const raw = String(process.env.OPENAI_VOICE_AGENT_ENABLED ?? '0').trim().toLowerCase();
-  return raw === '1' || raw === 'true';
+  return envBoolEnabled(process.env.OPENAI_VOICE_AGENT_ENABLED, false);
 }
 
 function resolveInstructions(style, locale) {

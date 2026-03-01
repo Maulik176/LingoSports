@@ -1,13 +1,7 @@
 import { notFound } from 'next/navigation';
 import Script from 'next/script';
 import { SUPPORTED_LOCALES, loadMessages, normalizeLocale } from '@/lib/i18n';
-
-function envBoolEnabled(value, defaultEnabled = true) {
-  if (value == null) return defaultEnabled;
-  const normalized = String(value).trim().toLowerCase();
-  if (!normalized) return defaultEnabled;
-  return normalized !== '0' && normalized !== 'false';
-}
+import { envBoolEnabled } from '@/lib/env';
 
 export async function generateStaticParams() {
   return SUPPORTED_LOCALES.map((locale) => ({ locale }));
@@ -112,7 +106,7 @@ export default async function LocalePage({ params }) {
               <h2 id="commentary-title">Live Commentary</h2>
               <div className="commentary-controls">
                 <span id="realtime-pill" className="realtime-pill">Real-time</span>
-                <button id="listen-toggle" className="listen-toggle" type="button" aria-pressed="false">
+                <button id="listen-toggle" className="listen-toggle" type="button">
                   Listen
                 </button>
                 <label className="speed-wrap" htmlFor="listen-speed">

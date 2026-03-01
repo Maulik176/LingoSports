@@ -16,6 +16,7 @@ const matchSubscribers = new Map();
 const ADMIN_WS_TOKEN = String(
   process.env.V2_ADMIN_WS_TOKEN || process.env.SEED_ADMIN_TOKEN || ''
 ).trim();
+const ADMIN_CHANNEL_ALLOWLIST = new Set(['lingo']);
 
 function firstHeaderValue(headerValue) {
   if (Array.isArray(headerValue)) return headerValue[0];
@@ -162,6 +163,14 @@ function isAuthorizedAdmin(socket, message) {
   return providedToken.length > 0 && providedToken === ADMIN_WS_TOKEN;
 }
 
+function normalizeAdminChannel(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function isAllowedAdminChannel(channel) {
+  return ADMIN_CHANNEL_ALLOWLIST.has(channel);
+}
+
 function handleMessage(socket, data) {
   let message;
   try {
@@ -209,9 +218,17 @@ function handleMessage(socket, data) {
       sendJson(socket, { type: 'error', message: 'Unauthorized' });
       return;
     }
-    const channel = String(message.channel || '').trim().toLowerCase();
+    const channel = normalizeAdminChannel(message.channel);
     if (!channel) {
       sendJson(socket, { type: 'error', message: 'Missing admin channel' });
+      return;
+    }
+    if (!isAllowedAdminChannel(channel)) {
+      sendJson(socket, {
+        type: 'error',
+        message: 'Unsupported admin channel',
+        details: { allowedChannels: Array.from(ADMIN_CHANNEL_ALLOWLIST) },
+      });
       return;
     }
     socket.adminChannels.add(channel);
@@ -224,9 +241,17 @@ function handleMessage(socket, data) {
       sendJson(socket, { type: 'error', message: 'Unauthorized' });
       return;
     }
-    const channel = String(message.channel || '').trim().toLowerCase();
+    const channel = normalizeAdminChannel(message.channel);
     if (!channel) {
       sendJson(socket, { type: 'error', message: 'Missing admin channel' });
+      return;
+    }
+    if (!isAllowedAdminChannel(channel)) {
+      sendJson(socket, {
+        type: 'error',
+        message: 'Unsupported admin channel',
+        details: { allowedChannels: Array.from(ADMIN_CHANNEL_ALLOWLIST) },
+      });
       return;
     }
     socket.adminChannels.delete(channel);

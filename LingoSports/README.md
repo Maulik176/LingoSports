@@ -2,8 +2,6 @@
 
 **Realtime Sports Engine with multilingual live commentary.**
 
-[YouTube Demo (Placeholder)](https://www.youtube.com/watch?v=YOUR_VIDEO_ID)
-
 LingoSports is a hackathon-ready platform that streams live sports events, updates scores in realtime, and localizes commentary into 8 languages using `lingo.dev`.
 
 It combines:

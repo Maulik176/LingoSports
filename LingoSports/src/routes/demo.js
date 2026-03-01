@@ -33,6 +33,9 @@ const DEFAULT_MATCH_DURATION_MINUTES =
     : 120;
 const SEED_SCRIPT_PATH = fileURLToPath(new URL('../seed/seed.js', import.meta.url));
 const DEMO_READY_DELAY_MS = 1500;
+const DEMO_ADMIN_TOKEN = String(
+  process.env.SEED_ADMIN_TOKEN || process.env.V2_ADMIN_WS_TOKEN || ''
+).trim();
 
 let latestSessionId = null;
 let activeSeedProcess = null;
@@ -52,17 +55,51 @@ function isSpikeEnabled() {
   return process.env.NODE_ENV !== 'production';
 }
 
+function resolveRequestAdminToken(req) {
+  const authHeader = String(req.get('authorization') || '').trim();
+  if (authHeader.toLowerCase().startsWith('bearer ')) {
+    return authHeader.slice('bearer '.length).trim();
+  }
+
+  const headerToken = String(req.get('x-admin-token') || '').trim();
+  if (headerToken) return headerToken;
+
+  const queryToken = String(req.query?.adminToken || '').trim();
+  if (queryToken) return queryToken;
+
+  if (req.body && typeof req.body === 'object') {
+    const bodyToken = String(req.body.adminToken || '').trim();
+    if (bodyToken) return bodyToken;
+  }
+
+  return '';
+}
+
+function isDemoAdminAuthorized(req) {
+  if (!DEMO_ADMIN_TOKEN) {
+    return process.env.NODE_ENV !== 'production';
+  }
+  const requestToken = resolveRequestAdminToken(req);
+  return requestToken.length > 0 && requestToken === DEMO_ADMIN_TOKEN;
+}
+
+function requireDemoAdmin(req, res) {
+  if (isDemoAdminAuthorized(req)) return true;
+  res.status(403).json({
+    error: 'Unauthorized',
+    details: 'Admin authorization is required for demo operations.',
+  });
+  return false;
+}
+
 function resolveApiUrl(req) {
   const configuredApiUrl = String(process.env.API_URL ?? '').trim();
   if (configuredApiUrl) return configuredApiUrl;
 
-  const host =
-    String(req.get('x-forwarded-host') ?? '').trim() ||
-    String(req.get('host') ?? '').trim();
+  const host = String(req.get('host') || req.hostname || '').trim();
   if (!host) return '';
 
-  const protoHeader = String(req.get('x-forwarded-proto') ?? '').trim();
-  const protocol = protoHeader.split(',')[0]?.trim() || req.protocol || 'http';
+  const protocol = String(req.protocol || 'http').trim() || 'http';
   return `${protocol}://${host}`;
 }
 
@@ -329,39 +366,51 @@ demoRouter.post('/start', async (req, res) => {
 });
 
 demoRouter.get('/status', async (req, res) => {
-  const sessionId = String(req.query?.sessionId ?? '').trim() || latestSessionId;
-  if (!sessionId) {
+  try {
+    const sessionId = String(req.query?.sessionId ?? '').trim() || latestSessionId;
+    if (!sessionId) {
+      return res.status(200).json({
+        data: {
+          sessionId: null,
+          status: 'idle',
+          activeMatches: await countActiveMatches(),
+          socketReady: false,
+        },
+      });
+    }
+
+    const session = demoSessions.get(sessionId);
+    if (!session) {
+      return res.status(404).json({
+        error: 'Demo session not found',
+        details: `No session found for id ${sessionId}`,
+      });
+    }
+
+    const activeMatches = await countActiveMatches();
+    const socketReady = session.status === 'ready' || activeMatches > 0;
+
     return res.status(200).json({
       data: {
-        sessionId: null,
-        status: 'idle',
-        activeMatches: await countActiveMatches(),
-        socketReady: false,
+        ...session,
+        activeMatches,
+        socketReady,
       },
     });
-  }
-
-  const session = demoSessions.get(sessionId);
-  if (!session) {
-    return res.status(404).json({
-      error: 'Demo session not found',
-      details: `No session found for id ${sessionId}`,
+  } catch (error) {
+    console.error('Failed to resolve demo status:', error);
+    return res.status(500).json({
+      error: 'Internal server error',
+      details: error?.message || 'Failed to resolve demo status',
     });
   }
-
-  const activeMatches = await countActiveMatches();
-  const socketReady = session.status === 'ready' || activeMatches > 0;
-
-  return res.status(200).json({
-    data: {
-      ...session,
-      activeMatches,
-      socketReady,
-    },
-  });
 });
 
 demoRouter.post('/simulate-spike', async (req, res) => {
+  if (!requireDemoAdmin(req, res)) {
+    return;
+  }
+
   if (!isSpikeEnabled()) {
     return res.status(403).json({
       error: 'Spike simulation is disabled',
