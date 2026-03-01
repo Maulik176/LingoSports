@@ -65,6 +65,40 @@ function resolveVoiceAgentInstructions(style, locale) {
   ].join(' ');
 }
 
+function extractAnswerSdp(payload) {
+  if (!payload || typeof payload !== 'object') return '';
+  if (
+    payload.answer
+    && typeof payload.answer === 'object'
+    && typeof payload.answer.sdp === 'string'
+    && payload.answer.sdp.trim()
+  ) {
+    return payload.answer.sdp.trim();
+  }
+  if (typeof payload.sdp === 'string' && payload.sdp.trim()) {
+    return payload.sdp.trim();
+  }
+  if (typeof payload.answer === 'string' && payload.answer.trim()) {
+    return payload.answer.trim();
+  }
+  return '';
+}
+
+async function createRealtimeCallWithFormData({ apiKey, offerSdp, sessionConfig, signal }) {
+  const requestBody = new FormData();
+  requestBody.set('sdp', String(offerSdp || ''));
+  requestBody.set('session', JSON.stringify(sessionConfig));
+
+  return fetch(OPENAI_REALTIME_CALLS_ENDPOINT, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${apiKey}`,
+    },
+    body: requestBody,
+    signal,
+  });
+}
+
 audioRouter.post('/speech', async (req, res) => {
   if (!isOpenAiTtsEnabled()) {
     return res.status(503).json({ error: 'OpenAI TTS is disabled' });
@@ -164,52 +198,50 @@ audioRouter.post('/agent/session', async (req, res) => {
   }, VOICE_AGENT_TIMEOUT_MS);
 
   try {
-    const response = await fetch(OPENAI_REALTIME_CALLS_ENDPOINT, {
-      method: 'POST',
-      headers: {
-        authorization: `Bearer ${apiKey}`,
-        'content-type': 'application/json',
-        'openai-beta': 'realtime=v1',
-      },
-      body: JSON.stringify({
-        type: 'offer',
-        sdp: parsed.data.offerSdp,
-        session: {
-          type: 'realtime',
-          model,
-          modalities: ['audio', 'text'],
-          instructions,
-          audio: {
-            output: {
-              voice,
-            },
-          },
+    const sessionConfig = {
+      type: 'realtime',
+      model,
+      modalities: ['audio', 'text'],
+      instructions,
+      audio: {
+        output: {
+          voice,
         },
-      }),
+      },
+    };
+    const response = await createRealtimeCallWithFormData({
+      apiKey,
+      offerSdp: parsed.data.offerSdp,
+      sessionConfig,
       signal: controller.signal,
     });
 
     if (!response.ok) {
       const text = await response.text();
+      console.error('OpenAI voice-agent upstream error', {
+        status: response.status,
+        details: text.slice(0, 800),
+      });
       return res.status(502).json({
         error: 'OpenAI voice-agent session request failed',
+        upstreamStatus: response.status,
         details: text.slice(0, 800),
       });
     }
 
     const contentType = String(response.headers.get('content-type') || '').toLowerCase();
+    const location = String(response.headers.get('location') || '').trim();
     let answerSdp = '';
-    let callId = null;
+    let callId = location ? location.split('/').filter(Boolean).at(-1) || null : null;
     let rawResponse = null;
 
     if (contentType.includes('application/json')) {
       const payload = await response.json();
       rawResponse = payload;
-      callId = payload?.id || null;
-      answerSdp =
-        String(payload?.answer?.sdp || '').trim()
-        || String(payload?.sdp || '').trim()
-        || String(payload?.answer || '').trim();
+      if (!callId && typeof payload?.id === 'string' && payload.id.trim()) {
+        callId = payload.id.trim();
+      }
+      answerSdp = extractAnswerSdp(payload);
     } else {
       answerSdp = String(await response.text()).trim();
     }

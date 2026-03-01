@@ -23,10 +23,14 @@ const SPIKE_SCHEMA = z.object({
   quality: z.enum(['standard', 'fast']).optional(),
 });
 
-const DEFAULT_MATCH_DURATION_MINUTES = Number.parseInt(
+const parsedMatchDurationMinutes = Number.parseInt(
   process.env.SEED_MATCH_DURATION_MINUTES || '120',
   10
 );
+const DEFAULT_MATCH_DURATION_MINUTES =
+  Number.isFinite(parsedMatchDurationMinutes) && parsedMatchDurationMinutes > 0
+    ? parsedMatchDurationMinutes
+    : 120;
 const SEED_SCRIPT_PATH = fileURLToPath(new URL('../seed/seed.js', import.meta.url));
 const DEMO_READY_DELAY_MS = 1500;
 
@@ -167,33 +171,47 @@ function spawnSeedReplay({ apiUrl, quality, app, sessionId }) {
 
   child.once('exit', async (code, signal) => {
     activeSeedProcess = null;
-    if (code === 0) {
-      const [{ count }] = await db
-        .select({ count: sql`count(*)` })
-        .from(matches)
-        .where(eq(matches.status, 'live'));
+    try {
+      if (code === 0) {
+        const [{ count }] = await db
+          .select({ count: sql`count(*)` })
+          .from(matches)
+          .where(eq(matches.status, 'live'));
+
+        setSessionState(
+          sessionId,
+          {
+            status: 'ready',
+            socketReady: true,
+            activeMatches: Number(count ?? 0),
+            completedAt: new Date().toISOString(),
+          },
+          app
+        );
+        return;
+      }
 
       setSessionState(
         sessionId,
         {
-          status: 'ready',
-          socketReady: true,
-          activeMatches: Number(count ?? 0),
+          status: 'failed',
+          error: `seed_exit_code_${code ?? 'null'}_${signal ?? 'none'}`,
+        },
+        app
+      );
+    } catch (error) {
+      console.error('Failed handling seed replay exit:', error?.message || error);
+      setSessionState(
+        sessionId,
+        {
+          status: 'failed',
+          socketReady: false,
+          error: 'seed_exit_handler_failed',
           completedAt: new Date().toISOString(),
         },
         app
       );
-      return;
     }
-
-    setSessionState(
-      sessionId,
-      {
-        status: 'failed',
-        error: `seed_exit_code_${code ?? 'null'}_${signal ?? 'none'}`,
-      },
-      app
-    );
   });
 }
 

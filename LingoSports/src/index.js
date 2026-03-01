@@ -21,6 +21,7 @@ import { attachWebSocketServer } from './ws/server.js';
 import { securityMiddleware } from './arcjet.js';
 import { preloadMatchesFromSeedData } from './seed/preload-matches.js';
 import { getLingoStatsSnapshot } from './lingo/stats.js';
+import { envBoolEnabled } from './utils/env.js';
 
 const PORT = Number(process.env.PORT) || 8000;
 const HOST = process.env.HOST || '0.0.0.0';
@@ -99,9 +100,7 @@ const translationHealthIntervalMs = Math.max(
   5000,
   Number.parseInt(process.env.V2_TRANSLATION_HEALTH_INTERVAL_MS || '15000', 10) || 15000
 );
-const isAdminDashboardEnabled =
-  String(process.env.V2_ADMIN_DASHBOARD_ENABLED ?? '').trim().toLowerCase() !== '0' &&
-  String(process.env.V2_ADMIN_DASHBOARD_ENABLED ?? '').trim().toLowerCase() !== 'false';
+const isAdminDashboardEnabled = envBoolEnabled(process.env.V2_ADMIN_DASHBOARD_ENABLED, true);
 
 if (isAdminDashboardEnabled) {
   setInterval(async () => {

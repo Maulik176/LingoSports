@@ -18,7 +18,7 @@ export const listCommentaryQuerySchema = z.object({
   const hasBeforeId = Number.isInteger(value.beforeId);
   if (hasBeforeCreatedAt !== hasBeforeId) {
     ctx.addIssue({
-      code: z.ZodIssueCode.custom,
+      code: 'custom',
       path: ['beforeCreatedAt'],
       message: 'beforeCreatedAt and beforeId must be provided together',
     });

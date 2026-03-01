@@ -4,15 +4,10 @@ import {
   getLingoLocaleStats,
   getLingoStatsSnapshot,
   listRecentTranslationEvents,
+  normalizeWindowMinutes,
 } from '../lingo/stats.js';
 
 export const lingoRouter = Router();
-
-function normalizeWindowMinutes(value, fallback = 15) {
-  const parsed = Number.parseInt(String(value ?? fallback), 10);
-  if (!Number.isFinite(parsed)) return fallback;
-  return Math.max(1, Math.min(24 * 60, parsed));
-}
 
 function normalizeLimit(value, fallback = 30) {
   const parsed = Number.parseInt(String(value ?? fallback), 10);
@@ -22,7 +17,7 @@ function normalizeLimit(value, fallback = 30) {
 
 lingoRouter.get('/stats', async (req, res) => {
   const quality = normalizeQuality(req.query?.quality, DEFAULT_QUALITY);
-  const windowMinutes = normalizeWindowMinutes(req.query?.windowMin, 15);
+  const windowMinutes = normalizeWindowMinutes(req.query?.windowMin);
 
   try {
     const stats = await getLingoStatsSnapshot({ quality, windowMinutes });
@@ -38,7 +33,7 @@ lingoRouter.get('/stats', async (req, res) => {
 
 lingoRouter.get('/stats/locales', async (req, res) => {
   const quality = normalizeQuality(req.query?.quality, DEFAULT_QUALITY);
-  const windowMinutes = normalizeWindowMinutes(req.query?.windowMin, 15);
+  const windowMinutes = normalizeWindowMinutes(req.query?.windowMin);
 
   try {
     const stats = await getLingoLocaleStats({ quality, windowMinutes });
@@ -73,4 +68,3 @@ lingoRouter.get('/events', async (req, res) => {
     return res.status(500).json(payload);
   }
 });
-

@@ -28,8 +28,18 @@ function includeSourceFlag(value) {
 }
 
 function parseCursor(queryData) {
-  if (!queryData?.beforeCreatedAt && !Number.isInteger(queryData?.beforeId)) {
+  const hasBeforeId = Number.isInteger(queryData?.beforeId);
+  const hasBeforeCreatedAt =
+    queryData?.beforeCreatedAt != null && String(queryData.beforeCreatedAt).trim() !== '';
+
+  if (!hasBeforeCreatedAt && !hasBeforeId) {
     return { cursor: null, error: null };
+  }
+  if (hasBeforeCreatedAt && !hasBeforeId) {
+    return { cursor: null, error: 'Missing beforeId cursor value' };
+  }
+  if (!hasBeforeCreatedAt && hasBeforeId) {
+    return { cursor: null, error: 'Missing beforeCreatedAt cursor value' };
   }
 
   const beforeCreatedAt = new Date(String(queryData.beforeCreatedAt || ''));

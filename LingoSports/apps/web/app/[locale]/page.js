@@ -2,6 +2,13 @@ import { notFound } from 'next/navigation';
 import Script from 'next/script';
 import { SUPPORTED_LOCALES, loadMessages, normalizeLocale } from '@/lib/i18n';
 
+function envBoolEnabled(value, defaultEnabled = true) {
+  if (value == null) return defaultEnabled;
+  const normalized = String(value).trim().toLowerCase();
+  if (!normalized) return defaultEnabled;
+  return normalized !== '0' && normalized !== 'false';
+}
+
 export async function generateStaticParams() {
   return SUPPORTED_LOCALES.map((locale) => ({ locale }));
 }
@@ -29,15 +36,9 @@ export default async function LocalePage({ params }) {
     messagesByLocale,
     locale,
     quality: 'standard',
-    v2AudioEnabled:
-      String(process.env.V2_AUDIO_TTS_ENABLED ?? '').trim().toLowerCase() !== '0' &&
-      String(process.env.V2_AUDIO_TTS_ENABLED ?? '').trim().toLowerCase() !== 'false',
-    openAiTtsEnabled:
-      String(process.env.OPENAI_TTS_ENABLED ?? '').trim().toLowerCase() !== '0' &&
-      String(process.env.OPENAI_TTS_ENABLED ?? '').trim().toLowerCase() !== 'false',
-    openAiVoiceAgentEnabled:
-      String(process.env.OPENAI_VOICE_AGENT_ENABLED ?? '').trim().toLowerCase() !== '0' &&
-      String(process.env.OPENAI_VOICE_AGENT_ENABLED ?? '').trim().toLowerCase() !== 'false',
+    v2AudioEnabled: envBoolEnabled(process.env.V2_AUDIO_TTS_ENABLED, true),
+    openAiTtsEnabled: envBoolEnabled(process.env.OPENAI_TTS_ENABLED, false),
+    openAiVoiceAgentEnabled: envBoolEnabled(process.env.OPENAI_VOICE_AGENT_ENABLED, false),
   };
 
   return (
@@ -76,7 +77,7 @@ export default async function LocalePage({ params }) {
                 ))}
               </select>
             </label>
-            <button id="theme-toggle" className="theme-toggle" type="button" aria-pressed="false">
+            <button id="theme-toggle" className="theme-toggle" type="button">
               <span id="theme-toggle-label" className="theme-toggle-label">Theme</span>
               <span id="theme-toggle-value" className="theme-toggle-value">Light</span>
             </button>

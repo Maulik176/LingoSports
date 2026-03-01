@@ -1,14 +1,9 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { fetchJson as fetchApiJson, wsBaseUrl } from '@/lib/api';
 
-const DEFAULT_API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8002';
-const DEFAULT_WS_BASE = process.env.NEXT_PUBLIC_WS_URL || 'ws://127.0.0.1:8002/ws';
-
-function resolveApiUrl(pathname) {
-  const base = String(DEFAULT_API_BASE || '').replace(/\/$/, '');
-  return `${base}${pathname.startsWith('/') ? pathname : `/${pathname}`}`;
-}
+const DEFAULT_WS_BASE = wsBaseUrl();
 
 function resolveWsUrl() {
   const base = String(DEFAULT_WS_BASE || '').trim();
@@ -17,21 +12,6 @@ function resolveWsUrl() {
     return `wss://${base.slice('ws://'.length)}`;
   }
   return base;
-}
-
-async function fetchJson(pathname, init) {
-  const response = await fetch(resolveApiUrl(pathname), init);
-  if (!response.ok) {
-    let message = `Request failed (${response.status})`;
-    try {
-      const payload = await response.json();
-      message = payload?.details || payload?.error || message;
-    } catch {
-      // Keep default message.
-    }
-    throw new Error(message);
-  }
-  return response.json();
 }
 
 function StatCard({ label, value, hint }) {
@@ -59,14 +39,14 @@ export default function AdminLingoPage() {
     return Object.entries(map).sort((a, b) => a[0].localeCompare(b[0]));
   }, [localeStats]);
 
-  async function loadAll() {
+  const loadAll = useCallback(async () => {
     setError('');
     try {
       const [statsRes, localeRes, eventsRes, demoRes] = await Promise.all([
-        fetchJson('/lingo/stats?quality=fast&windowMin=15'),
-        fetchJson('/lingo/stats/locales?quality=fast&windowMin=15'),
-        fetchJson('/lingo/events?quality=fast&limit=40'),
-        fetchJson('/demo/status'),
+        fetchApiJson('/lingo/stats?quality=fast&windowMin=15'),
+        fetchApiJson('/lingo/stats/locales?quality=fast&windowMin=15'),
+        fetchApiJson('/lingo/events?quality=fast&limit=40'),
+        fetchApiJson('/demo/status'),
       ]);
       setStats(statsRes?.data || null);
       setLocaleStats(localeRes?.data || null);
@@ -77,13 +57,13 @@ export default function AdminLingoPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
 
-  async function simulateSpike() {
+  const simulateSpike = useCallback(async () => {
     setSpikePending(true);
     setError('');
     try {
-      await fetchJson('/demo/simulate-spike', {
+      await fetchApiJson('/demo/simulate-spike', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ count: 12, quality: 'fast' }),
@@ -94,7 +74,7 @@ export default function AdminLingoPage() {
     } finally {
       setSpikePending(false);
     }
-  }
+  }, [loadAll]);
 
   useEffect(() => {
     void loadAll();
@@ -103,7 +83,7 @@ export default function AdminLingoPage() {
     }, 10000);
 
     return () => window.clearInterval(timer);
-  }, []);
+  }, [loadAll]);
 
   useEffect(() => {
     const wsUrl = resolveWsUrl();
@@ -117,7 +97,17 @@ export default function AdminLingoPage() {
     }
 
     socket.addEventListener('open', () => {
-      socket.send(JSON.stringify({ type: 'subscribe_admin', channel: 'lingo' }));
+      let adminToken = '';
+      try {
+        adminToken = String(new URLSearchParams(window.location.search).get('adminToken') || '').trim();
+      } catch {
+        adminToken = '';
+      }
+      socket.send(JSON.stringify({
+        type: 'subscribe_admin',
+        channel: 'lingo',
+        ...(adminToken ? { adminToken } : {}),
+      }));
     });
 
     socket.addEventListener('message', (event) => {
@@ -392,4 +382,3 @@ const styles = {
     lineHeight: 1.4,
   },
 };
-

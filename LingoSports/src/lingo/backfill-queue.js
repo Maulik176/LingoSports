@@ -1,3 +1,5 @@
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { dirname } from 'node:path';
 import {
   DEFAULT_QUALITY,
   DEFAULT_SOURCE_LOCALE,
@@ -14,11 +16,19 @@ const BACKFILL_QUEUE_MAX_PENDING = Math.max(
   50,
   Number.parseInt(process.env.LINGO_BACKFILL_QUEUE_MAX_PENDING || '4000', 10) || 4000
 );
+const BACKFILL_PERSIST_PATH = String(process.env.LINGO_BACKFILL_PERSIST_PATH || '').trim();
+const BACKFILL_SHUTDOWN_TIMEOUT_MS = Math.max(
+  1000,
+  Number.parseInt(process.env.LINGO_BACKFILL_SHUTDOWN_TIMEOUT_MS || '8000', 10) || 8000
+);
 
 const jobQueue = [];
 const queuedKeys = new Set();
 let activeWorkers = 0;
 let droppedJobs = 0;
+let acceptingJobs = true;
+let shutdownPromise = null;
+let signalHandlersRegistered = false;
 
 function buildJobKey(commentaryId, locale, quality) {
   return `${commentaryId}:${locale}:${quality}`;
@@ -29,6 +39,44 @@ function parseSourceLocale(commentaryRow) {
     commentaryRow?.sourceLocale || commentaryRow?.source_locale || DEFAULT_SOURCE_LOCALE,
     DEFAULT_SOURCE_LOCALE
   );
+}
+
+async function persistQueueSnapshot() {
+  if (!BACKFILL_PERSIST_PATH) return;
+  const payload = jobQueue.map((job) => ({
+    commentaryRow: job.commentaryRow,
+    matchId: job.matchId,
+    locale: job.locale,
+    quality: job.quality,
+  }));
+
+  try {
+    await mkdir(dirname(BACKFILL_PERSIST_PATH), { recursive: true });
+    await writeFile(BACKFILL_PERSIST_PATH, JSON.stringify(payload), 'utf8');
+  } catch (error) {
+    console.error('Failed to persist backfill queue snapshot:', error?.message || error);
+  }
+}
+
+async function recoverPersistedQueue() {
+  if (!BACKFILL_PERSIST_PATH) return;
+  try {
+    const fileContent = await readFile(BACKFILL_PERSIST_PATH, 'utf8');
+    const rows = JSON.parse(fileContent);
+    if (!Array.isArray(rows) || rows.length === 0) return;
+
+    for (const row of rows) {
+      enqueueCommentaryTranslationJob({
+        commentaryRow: row?.commentaryRow,
+        matchId: row?.matchId,
+        locale: row?.locale,
+        quality: row?.quality,
+      });
+    }
+    await writeFile(BACKFILL_PERSIST_PATH, '[]', 'utf8');
+  } catch {
+    // Ignore missing file or malformed persisted queue.
+  }
 }
 
 async function processJob(job) {
@@ -91,6 +139,13 @@ export function enqueueCommentaryTranslationJob({
   onResolved,
   onError,
 }) {
+  if (!acceptingJobs) {
+    return {
+      enqueued: false,
+      reason: 'shutting_down',
+    };
+  }
+
   if (!commentaryRow || !Number.isInteger(commentaryRow.id)) {
     return {
       enqueued: false,
@@ -169,3 +224,50 @@ export function getBackfillQueueStats() {
     workerConcurrency: BACKFILL_WORKER_CONCURRENCY,
   };
 }
+
+export async function shutdownBackfillQueue(options = {}) {
+  if (shutdownPromise) return shutdownPromise;
+  const timeoutMs = Math.max(
+    1000,
+    Number.parseInt(String(options.timeoutMs ?? BACKFILL_SHUTDOWN_TIMEOUT_MS), 10) || BACKFILL_SHUTDOWN_TIMEOUT_MS
+  );
+
+  acceptingJobs = false;
+  shutdownPromise = (async () => {
+    await persistQueueSnapshot();
+    const start = Date.now();
+    while (activeWorkers > 0) {
+      if (Date.now() - start >= timeoutMs) {
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+
+    return {
+      drained: activeWorkers === 0,
+      activeWorkers,
+      pendingJobs: jobQueue.length,
+      timeoutMs,
+    };
+  })();
+
+  return shutdownPromise;
+}
+
+function registerSignalHandlers() {
+  if (signalHandlersRegistered) return;
+  signalHandlersRegistered = true;
+
+  const handleSignal = (signal) => {
+    void shutdownBackfillQueue({ timeoutMs: BACKFILL_SHUTDOWN_TIMEOUT_MS })
+      .finally(() => {
+        process.exit(signal === 'SIGINT' ? 130 : 0);
+      });
+  };
+
+  process.once('SIGINT', () => handleSignal('SIGINT'));
+  process.once('SIGTERM', () => handleSignal('SIGTERM'));
+}
+
+registerSignalHandlers();
+void recoverPersistedQueue();

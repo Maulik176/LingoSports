@@ -269,7 +269,7 @@ npm run lingo:check
 - To auto-start demo seeding when judges open the Vercel site:
   - Backend (Render): `SEED_BOOTSTRAP_ENABLED=1`, `SEED_BOOTSTRAP_COOLDOWN_MS=900000`, `SEED_ADMIN_TOKEN=<shared-secret>`, `SEED_RESET_ENABLED=1`, `SEED_RESET_BEFORE_RUN=1`, `SEED_FORCE_LIVE=1`, `API_URL=https://<render-host>`
   - Frontend (Vercel): `SEED_BOOTSTRAP_ON_PAGE_OPEN=1`, `SEED_ADMIN_TOKEN=<shared-secret>`, `NEXT_PUBLIC_API_URL=https://<render-host>`, `NEXT_PUBLIC_WS_URL=wss://<render-host>/ws`
-- Keep `SEED_ADMIN_TOKEN` strong and private. Without a token, seed endpoints are open.
+- Keep `SEED_ADMIN_TOKEN` strong and private. Use at least 32 random characters (or equivalent entropy), generate it with a cryptographically secure source (for example `openssl rand -hex 32`), store it in your secrets manager, and rotate it regularly. Without a token, seed endpoints are open.
 
 ## Quality and Validation
 

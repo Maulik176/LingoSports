@@ -1,6 +1,6 @@
 import { and, desc, eq, gte, sql } from 'drizzle-orm';
 import { db } from '../db/db.js';
-import { commentary, commentaryTranslations, lingoTranslationEvents } from '../db/schema.js';
+import { lingoTranslationEvents } from '../db/schema.js';
 import { getLingoAvailability } from './engine.js';
 import { DEFAULT_QUALITY, PRECOMPUTE_LOCALES, TARGET_LOCALES, normalizeQuality } from './locale-utils.js';
 import { getPrecomputeQueueStats } from './translate-commentary.js';
@@ -16,15 +16,16 @@ export function normalizeWindowMinutes(value) {
   return Math.max(MIN_WINDOW_MINUTES, Math.min(MAX_WINDOW_MINUTES, parsed));
 }
 
-async function countQuery(query) {
-  const [row] = await query;
-  return Number(row?.count ?? 0);
-}
-
 function toFixedNumber(value, digits = 2) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return 0;
   return Number(parsed.toFixed(digits));
+}
+
+function getFirstExecuteRow(result) {
+  if (Array.isArray(result)) return result[0] ?? {};
+  if (Array.isArray(result?.rows)) return result.rows[0] ?? {};
+  return {};
 }
 
 export async function getLingoStatsSnapshot({
@@ -35,48 +36,40 @@ export async function getLingoStatsSnapshot({
   const normalizedWindow = normalizeWindowMinutes(windowMinutes);
   const windowStart = new Date(Date.now() - normalizedWindow * 60 * 1000);
 
-  const commentaryCount = await countQuery(
-    db.select({ count: sql`count(*)` }).from(commentary)
-  );
-  const translationCount = await countQuery(
-    db
-      .select({ count: sql`count(*)` })
-      .from(commentaryTranslations)
-      .where(eq(commentaryTranslations.quality, normalizedQuality))
-  );
-  const cacheHitCount = await countQuery(
-    db
-      .select({ count: sql`count(*)` })
-      .from(lingoTranslationEvents)
-      .where(
-        and(
-          eq(lingoTranslationEvents.quality, normalizedQuality),
-          eq(lingoTranslationEvents.status, 'cache-hit')
-        )
-      )
-  );
-  const generatedCount = await countQuery(
-    db
-      .select({ count: sql`count(*)` })
-      .from(lingoTranslationEvents)
-      .where(
-        and(
-          eq(lingoTranslationEvents.quality, normalizedQuality),
-          eq(lingoTranslationEvents.status, 'translated')
-        )
-      )
-  );
-  const fallbackCount = await countQuery(
-    db
-      .select({ count: sql`count(*)` })
-      .from(lingoTranslationEvents)
-      .where(
-        and(
-          eq(lingoTranslationEvents.quality, normalizedQuality),
-          eq(lingoTranslationEvents.status, 'fallback-source')
-        )
-      )
-  );
+  const countsQuery = await db.execute(sql`
+    select
+      (select count(*)::int from commentary) as commentary_count,
+      (
+        select count(*)::int
+        from commentary_translations ct
+        where ct.quality = ${normalizedQuality}
+      ) as translation_count,
+      (
+        select count(*)::int
+        from lingo_translation_events lte
+        where lte.quality = ${normalizedQuality}
+          and lte.status = 'cache-hit'
+      ) as cache_hit_count,
+      (
+        select count(*)::int
+        from lingo_translation_events lte
+        where lte.quality = ${normalizedQuality}
+          and lte.status = 'translated'
+      ) as generated_count,
+      (
+        select count(*)::int
+        from lingo_translation_events lte
+        where lte.quality = ${normalizedQuality}
+          and lte.status = 'fallback-source'
+      ) as fallback_count
+  `);
+  const countsRow = getFirstExecuteRow(countsQuery);
+
+  const commentaryCount = Number(countsRow?.commentary_count ?? 0);
+  const translationCount = Number(countsRow?.translation_count ?? 0);
+  const cacheHitCount = Number(countsRow?.cache_hit_count ?? 0);
+  const generatedCount = Number(countsRow?.generated_count ?? 0);
+  const fallbackCount = Number(countsRow?.fallback_count ?? 0);
 
   const [latencyRow] = await db
     .select({

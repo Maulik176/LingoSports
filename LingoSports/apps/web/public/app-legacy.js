@@ -131,6 +131,8 @@ const OPENAI_TTS_STYLE = 'hype commentator';
 const OPENAI_VOICE_AGENT_STYLE = 'hype commentator';
 const OPENAI_VOICE_AGENT_CONNECT_TIMEOUT_MS = 12000;
 const OPENAI_VOICE_AGENT_RESPONSE_TIMEOUT_MS = 18000;
+const OPENAI_AGENT_SESSION_TIMEOUT_MS = 10000;
+const OPENAI_TTS_REQUEST_TIMEOUT_MS = 10000;
 const THEME_STORAGE_KEY = 'lingosports.theme';
 const LOCALE_STORAGE_KEY = 'lingosports.locale';
 const SUPPORTED_AUDIO_RATES = new Set([1, 1.25]);
@@ -188,6 +190,7 @@ const state = {
   },
 };
 let activeMessages = resolveMessagesForLocale(state.locale);
+let demoStartInFlight = null;
 
 const elements = {
   heroEyebrow: document.querySelector('#hero-eyebrow'),
@@ -368,6 +371,27 @@ function resolveApiUrl(pathname) {
     return `${API_BASE_URL}${pathname.startsWith('/') ? pathname : `/${pathname}`}`;
   }
   return pathname;
+}
+
+async function fetchWithTimeout(url, init = {}, timeoutMs = 10000) {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => {
+    controller.abort();
+  }, Math.max(1000, Number(timeoutMs) || 10000));
+
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      throw new Error(`Request timed out after ${Math.max(1000, Number(timeoutMs) || 10000)}ms`);
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
 }
 
 function resolveWsUrl() {
@@ -998,7 +1022,7 @@ async function ensureVoiceAgentConnection(locale) {
       throw new Error('Voice agent offer SDP is empty');
     }
 
-    const sessionResponse = await fetch(resolveApiUrl('/audio/agent/session'), {
+    const sessionResponse = await fetchWithTimeout(resolveApiUrl('/audio/agent/session'), {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -1008,7 +1032,7 @@ async function ensureVoiceAgentConnection(locale) {
         locale: normalizeLocale(locale || state.locale, state.locale),
         style: OPENAI_VOICE_AGENT_STYLE,
       }),
-    });
+    }, OPENAI_AGENT_SESSION_TIMEOUT_MS);
     if (!sessionResponse.ok) {
       const details = await sessionResponse.text().catch(() => '');
       throw new Error(
@@ -1050,6 +1074,7 @@ async function ensureVoiceAgentConnection(locale) {
 function stopAudioQueue() {
   state.audio.queue = [];
   state.audio.speaking = false;
+  state.audio.seenCommentaryIds = new Set();
   clearCurrentAudioElement();
   clearVoiceAgentConnection();
   try {
@@ -1103,7 +1128,7 @@ function playBrowserTtsEntry(next) {
 }
 
 async function playOpenAiTtsEntry(next, { fromVoiceAgentFallback = false } = {}) {
-  const response = await fetch(resolveApiUrl('/audio/speech'), {
+  const response = await fetchWithTimeout(resolveApiUrl('/audio/speech'), {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
@@ -1114,7 +1139,7 @@ async function playOpenAiTtsEntry(next, { fromVoiceAgentFallback = false } = {})
       rate: state.audio.rate,
       style: OPENAI_TTS_STYLE,
     }),
-  });
+  }, OPENAI_TTS_REQUEST_TIMEOUT_MS);
 
   if (!response.ok) {
     throw new Error(`OpenAI speech request failed (${response.status})`);
@@ -1618,28 +1643,38 @@ function scheduleDemoPoll(sessionId) {
 }
 
 async function startDemoSession() {
-  updateDemoStatusPill('starting');
-  try {
-    const payload = await fetchJson('/demo/start', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        mode: 'judge',
-        quality: state.quality,
-        locale: state.locale,
-      }),
-    });
-
-    const data = payload?.data || {};
-    if (data.sessionId) {
-      state.demoSessionId = data.sessionId;
-      scheduleDemoPoll(data.sessionId);
-    }
-    updateDemoStatusPill(data.status || 'starting');
-  } catch (error) {
-    console.error('Failed to start demo session:', error?.message || error);
-    updateDemoStatusPill('failed');
+  if (demoStartInFlight) {
+    return demoStartInFlight;
   }
+
+  updateDemoStatusPill('starting');
+  demoStartInFlight = (async () => {
+    try {
+      const payload = await fetchJson('/demo/start', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          mode: 'judge',
+          quality: state.quality,
+          locale: state.locale,
+        }),
+      });
+
+      const data = payload?.data || {};
+      if (data.sessionId) {
+        state.demoSessionId = data.sessionId;
+        scheduleDemoPoll(data.sessionId);
+      }
+      updateDemoStatusPill(data.status || 'starting');
+    } catch (error) {
+      console.error('Failed to start demo session:', error?.message || error);
+      updateDemoStatusPill('failed');
+    } finally {
+      demoStartInFlight = null;
+    }
+  })();
+
+  return demoStartInFlight;
 }
 
 async function loadMatches() {
@@ -1931,7 +1966,10 @@ async function ensureCommentaryLoaded(matchId, options = {}) {
     }
     if (mode === 'append') {
       const existing = state.commentaryByMatchId.get(matchId) || [];
-      state.commentaryByMatchId.set(matchId, sortCommentary([...existing, ...entries]));
+      state.commentaryByMatchId.set(
+        matchId,
+        sortCommentary(dedupeCommentaryEntries([...existing, ...entries]))
+      );
     } else {
       state.commentaryByMatchId.set(matchId, sortCommentary(entries));
     }
@@ -1958,6 +1996,19 @@ async function ensureCommentaryLoaded(matchId, options = {}) {
       syncTranslationLoadingState();
     }
   }
+}
+
+function dedupeCommentaryEntries(entries) {
+  const deduped = new Map();
+  for (const entry of entries) {
+    const entryId = Number(entry?.id);
+    const fallbackKey = `${entry?.createdAt || ''}:${entry?.sequence || ''}:${entry?.message || ''}`;
+    const key = Number.isInteger(entryId) ? `id:${entryId}` : `fallback:${fallbackKey}`;
+    if (!deduped.has(key)) {
+      deduped.set(key, entry);
+    }
+  }
+  return Array.from(deduped.values());
 }
 
 function sortCommentary(entries) {
@@ -2253,6 +2304,12 @@ function handleSocketMessage(payload) {
     // Keep this lightweight in the fan UI; the full stream is shown in /admin/lingo.
     if (payload.data.availability?.available === false) {
       elements.connectionText.textContent = 'LIVE · FALLBACK';
+    } else {
+      elements.connectionText.textContent = state.socketConnected
+        ? t('connection.connected', 'LIVE CONNECTED')
+        : state.reconnectAttempts > 0
+          ? t('connection.reconnecting', 'RECONNECTING')
+          : t('connection.connecting', 'CONNECTING');
     }
     return;
   }

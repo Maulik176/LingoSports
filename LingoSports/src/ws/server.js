@@ -13,6 +13,9 @@ import { localizeCommentaryForLocale } from '../lingo/translate-commentary.js';
 import { enqueueCommentaryTranslationJob } from '../lingo/backfill-queue.js';
 
 const matchSubscribers = new Map();
+const ADMIN_WS_TOKEN = String(
+  process.env.V2_ADMIN_WS_TOKEN || process.env.SEED_ADMIN_TOKEN || ''
+).trim();
 
 function firstHeaderValue(headerValue) {
   if (Array.isArray(headerValue)) return headerValue[0];
@@ -151,6 +154,14 @@ function parseSubscribeMessage(message) {
   };
 }
 
+function isAuthorizedAdmin(socket, message) {
+  const providedToken = String(message?.adminToken || socket?.adminToken || '').trim();
+  if (!ADMIN_WS_TOKEN) {
+    return process.env.NODE_ENV !== 'production';
+  }
+  return providedToken.length > 0 && providedToken === ADMIN_WS_TOKEN;
+}
+
 function handleMessage(socket, data) {
   let message;
   try {
@@ -194,6 +205,10 @@ function handleMessage(socket, data) {
   }
 
   if (message?.type === 'subscribe_admin') {
+    if (!isAuthorizedAdmin(socket, message)) {
+      sendJson(socket, { type: 'error', message: 'Unauthorized' });
+      return;
+    }
     const channel = String(message.channel || '').trim().toLowerCase();
     if (!channel) {
       sendJson(socket, { type: 'error', message: 'Missing admin channel' });
@@ -205,6 +220,10 @@ function handleMessage(socket, data) {
   }
 
   if (message?.type === 'unsubscribe_admin') {
+    if (!isAuthorizedAdmin(socket, message)) {
+      sendJson(socket, { type: 'error', message: 'Unauthorized' });
+      return;
+    }
     const channel = String(message.channel || '').trim().toLowerCase();
     if (!channel) {
       sendJson(socket, { type: 'error', message: 'Missing admin channel' });
@@ -312,6 +331,13 @@ export function attachWebSocketServer(server) {
 
     socket.subscriptions = new Map();
     socket.adminChannels = new Set();
+    socket.adminToken = '';
+    try {
+      const requestUrl = new URL(req.url || '/ws', 'http://localhost');
+      socket.adminToken = String(requestUrl.searchParams.get('adminToken') || '').trim();
+    } catch {
+      socket.adminToken = '';
+    }
 
     sendJson(socket, { type: 'welcome' });
 

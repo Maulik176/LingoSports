@@ -8,10 +8,10 @@ export const createSpeechRequestSchema = z.object({
   locale: localeSchema.optional(),
   rate: z.coerce.number().min(0.75).max(1.5).optional(),
   style: z.string().trim().min(1).max(80).optional(),
-});
+}).strict();
 
 export const createVoiceAgentSessionSchema = z.object({
   offerSdp: z.string().trim().min(32).max(120000),
   locale: localeSchema.optional(),
   style: z.string().trim().min(1).max(80).optional(),
-});
+}).strict();
