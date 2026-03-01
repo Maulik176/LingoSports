@@ -8,9 +8,21 @@ export const listCommentaryQuerySchema = z.object({
   limit: z.coerce.number().int().positive().max(100).optional(),
   locale: localeSchema.optional(),
   quality: qualitySchema.optional(),
+  beforeCreatedAt: z.string().optional(),
+  beforeId: z.coerce.number().int().positive().optional(),
   includeSource: z
     .union([z.literal('0'), z.literal('1'), z.literal(0), z.literal(1)])
     .optional(),
+}).superRefine((value, ctx) => {
+  const hasBeforeCreatedAt = typeof value.beforeCreatedAt === 'string' && value.beforeCreatedAt.trim() !== '';
+  const hasBeforeId = Number.isInteger(value.beforeId);
+  if (hasBeforeCreatedAt !== hasBeforeId) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['beforeCreatedAt'],
+      message: 'beforeCreatedAt and beforeId must be provided together',
+    });
+  }
 });
 
 export const createCommentarySchema = z.object({

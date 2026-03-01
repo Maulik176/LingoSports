@@ -12,6 +12,13 @@ npm run dev
 
 The app expects the backend to run on `http://127.0.0.1:8002` and websocket at `ws://127.0.0.1:8002/ws`.
 
+For production with automatic seed bootstrap on page open, set Vercel env vars:
+
+- `NEXT_PUBLIC_API_URL` (Render backend URL)
+- `NEXT_PUBLIC_WS_URL` (`wss://.../ws`)
+- `SEED_BOOTSTRAP_ON_PAGE_OPEN=1`
+- `SEED_ADMIN_TOKEN` (same value as backend `SEED_ADMIN_TOKEN`)
+
 ## Localization Files
 
 - Source locale: `apps/web/messages/en.json`

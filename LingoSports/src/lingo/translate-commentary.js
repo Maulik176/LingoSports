@@ -348,6 +348,17 @@ export function schedulePrecomputeCommentaryTranslations(commentaryRow, quality 
   });
 }
 
+export function getPrecomputeQueueStats() {
+  return {
+    queueSize: precomputeQueue.length,
+    workers: precomputeWorkers,
+    dropped: precomputeDropCount,
+    queueMaxPending: PRECOMPUTE_QUEUE_MAX_PENDING,
+    queueConcurrency: PRECOMPUTE_QUEUE_CONCURRENCY,
+    precomputeConcurrency: PRECOMPUTE_TRANSLATION_CONCURRENCY,
+  };
+}
+
 export async function localizeCommentaryForLocale(commentaryRow, {
   locale,
   quality = DEFAULT_QUALITY,

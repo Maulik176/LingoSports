@@ -18,12 +18,35 @@ import {
   buildGlobalFanView,
 } from '../lingo/translate-commentary.js';
 import { listMatchCommentaryRaw } from '../lingo/cache.js';
+import { enqueueCommentaryTranslationsForRows } from '../lingo/backfill-queue.js';
 
 export const commentaryRouter = Router({ mergeParams: true });
 const MAX_LIMIT = 100;
 
 function includeSourceFlag(value) {
   return String(value ?? '0') === '1';
+}
+
+function parseCursor(queryData) {
+  if (!queryData?.beforeCreatedAt && !Number.isInteger(queryData?.beforeId)) {
+    return { cursor: null, error: null };
+  }
+
+  const beforeCreatedAt = new Date(String(queryData.beforeCreatedAt || ''));
+  if (Number.isNaN(beforeCreatedAt.getTime())) {
+    return {
+      cursor: null,
+      error: 'Invalid beforeCreatedAt cursor value',
+    };
+  }
+
+  return {
+    cursor: {
+      beforeCreatedAt,
+      beforeId: queryData.beforeId,
+    },
+    error: null,
+  };
 }
 
 commentaryRouter.get('/', async (req, res) => {
@@ -47,24 +70,70 @@ commentaryRouter.get('/', async (req, res) => {
   const locale = normalizeLocale(parsedQuery.data.locale, DEFAULT_SOURCE_LOCALE);
   const quality = normalizeQuality(parsedQuery.data.quality, DEFAULT_QUALITY);
   const includeSource = includeSourceFlag(parsedQuery.data.includeSource);
+  const parsedCursor = parseCursor(parsedQuery.data);
+  if (parsedCursor.error) {
+    return res.status(400).json({
+      error: parsedCursor.error,
+    });
+  }
 
   try {
-    const rows = await listMatchCommentaryRaw(parsedParams.data.id, limit);
+    const { rows, hasMore, nextCursor } = await listMatchCommentaryRaw(
+      parsedParams.data.id,
+      limit,
+      parsedCursor.cursor
+    );
     const localized = await localizeCommentaryInBulk(rows, {
       locale,
       quality,
       includeSource,
-      allowOnDemand: true,
+      allowOnDemand: false,
     });
 
-    return res.status(200).json({
+    const missingRows = rows.filter((row, index) => {
+      const localizedEntry = localized[index];
+      if (!localizedEntry) return false;
+      if (locale === row.sourceLocale) return false;
+      return String(localizedEntry.translation?.status || '').trim().toLowerCase() === 'fallback-source';
+    });
+
+    const responsePayload = {
       data: localized,
       meta: {
         locale,
         quality,
         includeSource,
+        hasMore,
+        nextCursor: nextCursor
+          ? {
+              beforeCreatedAt: nextCursor.beforeCreatedAt.toISOString(),
+              beforeId: nextCursor.beforeId,
+            }
+          : null,
       },
-    });
+    };
+
+    res.status(200).json(responsePayload);
+
+    if (missingRows.length > 0) {
+      const broadCastCommentaryTranslationReady = res.app.locals.broadCastCommentaryTranslationReady;
+      setImmediate(() => {
+        enqueueCommentaryTranslationsForRows(missingRows, {
+          matchId: parsedParams.data.id,
+          locale,
+          quality,
+          onResolved: (payload, metadata) => {
+            if (typeof broadCastCommentaryTranslationReady === 'function') {
+              broadCastCommentaryTranslationReady(metadata.matchId, payload, {
+                locale: metadata.locale,
+                quality: metadata.quality,
+              });
+            }
+          },
+        });
+      });
+    }
+    return;
   } catch (error) {
     console.error('Failed to list commentary:', error);
     const payload = { error: 'Failed to list commentary' };
