@@ -1,6 +1,7 @@
 import { notFound } from 'next/navigation';
 import Script from 'next/script';
 import { SUPPORTED_LOCALES, loadMessages, normalizeLocale } from '@/lib/i18n';
+import { envBoolEnabled } from '@/lib/env';
 
 export async function generateStaticParams() {
   return SUPPORTED_LOCALES.map((locale) => ({ locale }));
@@ -29,16 +30,37 @@ export default async function LocalePage({ params }) {
     messagesByLocale,
     locale,
     quality: 'standard',
+    v2AudioEnabled: envBoolEnabled(process.env.V2_AUDIO_TTS_ENABLED, true),
+    openAiTtsEnabled: envBoolEnabled(process.env.OPENAI_TTS_ENABLED, false),
+    openAiVoiceAgentEnabled: envBoolEnabled(process.env.OPENAI_VOICE_AGENT_ENABLED, false),
   };
 
   return (
     <>
+      <Script
+        id="lingosports-theme-init"
+        strategy="beforeInteractive"
+        dangerouslySetInnerHTML={{
+          __html: `try{var t=localStorage.getItem('lingosports.theme');if(t==='light'||t==='dark'){document.documentElement.dataset.theme=t;}}catch(_e){}`,
+        }}
+      />
       <main className="app-shell">
         <header className="hero-card">
           <div>
             <p id="hero-eyebrow" className="eyebrow">Realtime Sports Engine</p>
             <h1>Lingo Sports</h1>
             <p id="hero-subtitle" className="subtitle">Multilingual commentary and scores</p>
+            <div className="hero-actions">
+              <button id="demo-start-button" className="demo-start-button" type="button">
+                <span id="demo-start-text">Start Live Demo</span>
+              </button>
+              <span id="demo-status-pill" className="demo-status-pill" aria-live="polite">
+                Demo idle
+              </span>
+              <a className="admin-link" href="/admin/lingo" target="_blank" rel="noreferrer">
+                Lingo Proof
+              </a>
+            </div>
           </div>
           <div className="hero-right">
             <label className="locale-pill" htmlFor="language-select">
@@ -49,6 +71,10 @@ export default async function LocalePage({ params }) {
                 ))}
               </select>
             </label>
+            <button id="theme-toggle" className="theme-toggle" type="button">
+              <span id="theme-toggle-label" className="theme-toggle-label">Theme</span>
+              <span id="theme-toggle-value" className="theme-toggle-value">Light</span>
+            </button>
             <div id="connection-pill" className="connection-pill disconnected">
               <span className="dot" aria-hidden="true"></span>
               <span id="connection-text">CONNECTING</span>
@@ -78,7 +104,22 @@ export default async function LocalePage({ params }) {
           <aside className="commentary-panel">
             <div className="commentary-header">
               <h2 id="commentary-title">Live Commentary</h2>
-              <span id="realtime-pill" className="realtime-pill">Real-time</span>
+              <div className="commentary-controls">
+                <span id="realtime-pill" className="realtime-pill">Real-time</span>
+                <button id="listen-toggle" className="listen-toggle" type="button">
+                  Listen
+                </button>
+                <label className="speed-wrap" htmlFor="listen-speed">
+                  <span className="speed-label">Speed</span>
+                  <select id="listen-speed" className="speed-select" defaultValue="1">
+                    <option value="1">1x</option>
+                    <option value="1.25">1.25x</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+            <div id="audio-status" className="audio-status" aria-live="polite">
+              Audio ready
             </div>
             <div id="commentary-list" className="commentary-list">
               <div className="panel-placeholder">Select a match to start streaming commentary.</div>

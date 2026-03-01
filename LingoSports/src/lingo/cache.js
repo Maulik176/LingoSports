@@ -1,4 +1,4 @@
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, lt, or, sql } from 'drizzle-orm';
 import { db } from '../db/db.js';
 import {
   commentary,
@@ -99,11 +99,47 @@ export async function recordTranslationEvent({
   }
 }
 
-export async function listMatchCommentaryRaw(matchId, limit) {
-  return db
+export async function listMatchCommentaryRaw(matchId, limit, cursor = null) {
+  const safeLimit = Math.max(1, Math.min(100, Number.parseInt(String(limit), 10) || 100));
+  const hasCursor = cursor
+    && cursor.beforeCreatedAt instanceof Date
+    && !Number.isNaN(cursor.beforeCreatedAt.getTime())
+    && Number.isInteger(cursor.beforeId);
+
+  let whereClause = eq(commentary.matchId, matchId);
+  if (hasCursor) {
+    whereClause = and(
+      whereClause,
+      or(
+        lt(commentary.createdAt, cursor.beforeCreatedAt),
+        and(
+          eq(commentary.createdAt, cursor.beforeCreatedAt),
+          lt(commentary.id, cursor.beforeId)
+        )
+      )
+    );
+  }
+
+  const rows = await db
     .select()
     .from(commentary)
-    .where(eq(commentary.matchId, matchId))
-    .orderBy(desc(commentary.createdAt))
-    .limit(limit);
+    .where(whereClause)
+    .orderBy(desc(commentary.createdAt), desc(commentary.id))
+    .limit(safeLimit + 1);
+
+  const hasMore = rows.length > safeLimit;
+  const pageRows = hasMore ? rows.slice(0, safeLimit) : rows;
+  const lastRow = pageRows[pageRows.length - 1] || null;
+  const nextCursor = hasMore && lastRow
+    ? {
+        beforeCreatedAt: lastRow.createdAt,
+        beforeId: lastRow.id,
+      }
+    : null;
+
+  return {
+    rows: pageRows,
+    hasMore,
+    nextCursor,
+  };
 }

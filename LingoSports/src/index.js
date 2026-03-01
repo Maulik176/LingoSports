@@ -15,9 +15,13 @@ import { matchRouter } from './routes/matches.js';
 import { commentaryRouter } from './routes/commentary.js';
 import { lingoRouter } from './routes/lingo.js';
 import { seedRouter } from './routes/seed.js';
+import { demoRouter } from './routes/demo.js';
+import { audioRouter } from './routes/audio.js';
 import { attachWebSocketServer } from './ws/server.js';
 import { securityMiddleware } from './arcjet.js';
 import { preloadMatchesFromSeedData } from './seed/preload-matches.js';
+import { getLingoStatsSnapshot } from './lingo/stats.js';
+import { envBoolEnabled } from './utils/env.js';
 
 const PORT = Number(process.env.PORT) || 8000;
 const HOST = process.env.HOST || '0.0.0.0';
@@ -71,13 +75,57 @@ app.use('/matches', matchRouter);
 app.use('/matches/:id/commentary', commentaryRouter);
 app.use('/lingo', lingoRouter);
 app.use('/seed', seedRouter);
+app.use('/demo', demoRouter);
+app.use('/audio', audioRouter);
 
-const { broadCastMatchCreated, broadCastMatchUpdated, broadCastCommentary, broadCastDataReset } =
+const {
+  broadCastMatchCreated,
+  broadCastMatchUpdated,
+  broadCastCommentary,
+  broadCastCommentaryTranslationReady,
+  broadCastDataReset,
+  broadCastDemoStatus,
+  broadCastTranslationHealth,
+} =
   attachWebSocketServer(server);
 app.locals.broadCastMatchCreated = broadCastMatchCreated;
 app.locals.broadCastMatchUpdated = broadCastMatchUpdated;
 app.locals.broadCastCommentary = broadCastCommentary;
+app.locals.broadCastCommentaryTranslationReady = broadCastCommentaryTranslationReady;
 app.locals.broadCastDataReset = broadCastDataReset;
+app.locals.broadCastDemoStatus = broadCastDemoStatus;
+app.locals.broadCastTranslationHealth = broadCastTranslationHealth;
+
+const translationHealthIntervalMs = Math.max(
+  5000,
+  Number.parseInt(process.env.V2_TRANSLATION_HEALTH_INTERVAL_MS || '15000', 10) || 15000
+);
+const isAdminDashboardEnabled = envBoolEnabled(process.env.V2_ADMIN_DASHBOARD_ENABLED, true);
+
+if (isAdminDashboardEnabled) {
+  setInterval(async () => {
+    if (typeof app.locals.broadCastTranslationHealth !== 'function') return;
+    try {
+      const stats = await getLingoStatsSnapshot({
+        quality: process.env.LINGO_TRANSLATION_QUALITY || 'standard',
+        windowMinutes: Number.parseInt(process.env.V2_TRANSLATION_HEALTH_WINDOW_MIN || '15', 10) || 15,
+      });
+
+      app.locals.broadCastTranslationHealth({
+        quality: stats.quality,
+        availability: stats.availability,
+        cacheHitRatio: stats.cacheHitRatio,
+        coveragePercent: stats.coveragePercent,
+        p95LatencyMs: stats.p95LatencyMs,
+        fallbackRatePercent: stats.fallbackRatePercent,
+        window: stats.window,
+        precomputeQueue: stats.precomputeQueue,
+      });
+    } catch (error) {
+      console.error('Failed to broadcast translation health snapshot:', error?.message || error);
+    }
+  }, translationHealthIntervalMs).unref();
+}
 
 try {
   const preloadResult = await preloadMatchesFromSeedData();

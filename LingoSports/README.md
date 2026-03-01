@@ -29,6 +29,21 @@ Most live sports apps are strong in realtime but weak in multilingual fan reach.
 - Seed/reset workflow for deterministic hackathon demos
 - Localization CI workflow with `lingo.dev`
 
+## Lingo Feature Usage Matrix (Judge View)
+
+| Lingo Feature | How We Use It | Where It Is Implemented | Judge Value |
+|---|---|---|---|
+| Runtime Translation Engine | Commentary is translated at runtime per subscriber locale and quality (`fast`/`standard`). | `src/lingo/engine.js`, `src/lingo/translate-commentary.js` | Demonstrates real AI-powered multilingual delivery, not static text swaps. |
+| Source Locale Recognition | When source locale is missing/uncertain, locale is recognized before translation. | `src/lingo/engine.js` (`recognizeLocale`), `src/lingo/translate-commentary.js` | Handles mixed-language inputs robustly in live flows. |
+| Multi-Locale Target Routing | Targets are configured as `en -> es, fr, de, hi, ar, ja, pt` and normalized consistently. | `src/lingo/locale-utils.js`, `i18n.json` | Proves deliberate global audience support with controlled locale policy. |
+| Precompute Translation Queue | New commentary can be precomputed for target locales in background workers. | `src/lingo/translate-commentary.js` (`schedulePrecomputeCommentaryTranslations`) | Reduces translation wait time during spikes and improves perceived realtime UX. |
+| On-Demand Translation Fallback | If precompute is unavailable, source text is delivered first, then translated update follows. | `src/lingo/translate-commentary.js`, `src/ws/server.js` (`commentary_translation_ready`) | Shows graceful degradation plus eventual consistency in realtime systems. |
+| Translation Caching | Translations are persisted and reused via cache-hit logic. | `src/lingo/cache.js`, table `commentary_translations` in `src/db/schema.js` | Improves performance/cost efficiency and validates production-minded design. |
+| Translation Telemetry | Every translation/cache/fallback event is logged for quality and ops visibility. | `src/lingo/cache.js` (`recordTranslationEvent`), `src/routes/lingo.js` (`/lingo/stats`) | Gives measurable proof of system behavior for judges. |
+| Lingo CLI for UI Localization | Locale files are generated/validated through Lingo CLI workflow. | `package.json` (`lingo:run`, `lingo:check`, `lingo:ci`), `apps/web/messages/*` | Demonstrates end-to-end localization workflow beyond backend translation only. |
+| CI Frozen Verification | CI fails if localization output is out of sync using frozen Lingo checks. | `.github/workflows/lingo.yml` (`npx lingo.dev run --frozen`) | Proves localization quality gates are enforced in CI/CD. |
+| CI Translation PR Automation | Manual workflow can run `lingo.dev ci` to generate/update translation PRs. | `.github/workflows/lingo.yml` (`workflow_dispatch`, `npx lingo.dev ci`) | Shows mature translation operations and repeatable release process. |
+
 ## Architecture
 
 ```mermaid
@@ -94,6 +109,7 @@ flowchart LR
 | `POST` | `/matches/:id/commentary` | Ingest commentary event |
 | `GET` | `/lingo/stats?quality=standard` | Translation coverage/cache/latency stats |
 | `POST` | `/seed/reset` | Reset commentary/translations and zero scores for demo replay |
+| `POST` | `/seed/bootstrap` | Trigger one seed run in the background (cooldown + token protected) |
 
 ### WebSocket (`/ws`)
 
@@ -248,8 +264,10 @@ npm run lingo:check
   - `NEXT_PUBLIC_API_URL`
   - `NEXT_PUBLIC_WS_URL` (`wss://.../ws` in production)
 - Ensure backend `CORS_ORIGINS` includes your frontend origin.
-- Keep destructive demo endpoints locked down in production:
-  - `SEED_RESET_ENABLED=0`
+- To auto-start demo seeding when judges open the Vercel site:
+  - Backend (Render): `SEED_BOOTSTRAP_ENABLED=1`, `SEED_BOOTSTRAP_COOLDOWN_MS=900000`, `SEED_ADMIN_TOKEN=<shared-secret>`, `SEED_RESET_ENABLED=1`, `SEED_RESET_BEFORE_RUN=1`, `SEED_FORCE_LIVE=1`, `API_URL=https://<render-host>`
+  - Frontend (Vercel): `SEED_BOOTSTRAP_ON_PAGE_OPEN=1`, `SEED_ADMIN_TOKEN=<shared-secret>`, `NEXT_PUBLIC_API_URL=https://<render-host>`, `NEXT_PUBLIC_WS_URL=wss://<render-host>/ws`
+- Keep `SEED_ADMIN_TOKEN` strong and private. Use at least 32 random characters (or equivalent entropy), generate it with a cryptographically secure source (for example `openssl rand -hex 32`), store it in your secrets manager, and rotate it regularly. Without a token, seed endpoints are open.
 
 ## Quality and Validation
 

@@ -10,8 +10,13 @@ import {
   SUPPORTED_LOCALES,
 } from '../lingo/locale-utils.js';
 import { localizeCommentaryForLocale } from '../lingo/translate-commentary.js';
+import { enqueueCommentaryTranslationJob } from '../lingo/backfill-queue.js';
 
 const matchSubscribers = new Map();
+const ADMIN_WS_TOKEN = String(
+  process.env.V2_ADMIN_WS_TOKEN || process.env.SEED_ADMIN_TOKEN || ''
+).trim();
+const ADMIN_CHANNEL_ALLOWLIST = new Set(['lingo']);
 
 function firstHeaderValue(headerValue) {
   if (Array.isArray(headerValue)) return headerValue[0];
@@ -65,6 +70,9 @@ function cleanUpSubscriptions(socket) {
     unsubscribe(matchId, socket);
   }
   socket.subscriptions.clear();
+  if (socket.adminChannels instanceof Set) {
+    socket.adminChannels.clear();
+  }
 }
 
 function sendJson(socket, payload) {
@@ -72,9 +80,43 @@ function sendJson(socket, payload) {
   socket.send(JSON.stringify(payload));
 }
 
+function broadCastCommentaryTranslationReadyToSubscribers(matchId, payload, options = {}) {
+  const subscribers = matchSubscribers.get(matchId);
+  if (!subscribers || subscribers.size === 0) return;
+
+  const locale = normalizeLocale(options.locale || payload?.locale, DEFAULT_SOURCE_LOCALE);
+  const quality = normalizeQuality(options.quality || payload?.quality, DEFAULT_QUALITY);
+
+  for (const client of subscribers) {
+    if (client.readyState !== WebSocket.OPEN) continue;
+
+    const preferences = client.subscriptions.get(matchId) || {};
+    const preferredLocale = normalizeLocale(preferences.locale, DEFAULT_SOURCE_LOCALE);
+    const preferredQuality = normalizeQuality(preferences.quality, DEFAULT_QUALITY);
+    if (preferredLocale !== locale || preferredQuality !== quality) continue;
+
+    sendJson(client, {
+      type: 'commentary_translation_ready',
+      commentaryId: payload?.id,
+      locale,
+      quality,
+      data: payload,
+    });
+  }
+}
+
 function broadCastToAll(wss, payload) {
   for (const client of wss.clients) {
     if (!client) continue;
+    sendJson(client, payload);
+  }
+}
+
+function broadCastToAdmins(wss, channel, payload) {
+  for (const client of wss.clients) {
+    if (!client || client.readyState !== WebSocket.OPEN) continue;
+    if (!(client.adminChannels instanceof Set)) continue;
+    if (!client.adminChannels.has(channel)) continue;
     sendJson(client, payload);
   }
 }
@@ -111,6 +153,22 @@ function parseSubscribeMessage(message) {
     locale,
     quality,
   };
+}
+
+function isAuthorizedAdmin(socket, message) {
+  const providedToken = String(message?.adminToken || socket?.adminToken || '').trim();
+  if (!ADMIN_WS_TOKEN) {
+    return process.env.NODE_ENV !== 'production';
+  }
+  return providedToken.length > 0 && providedToken === ADMIN_WS_TOKEN;
+}
+
+function normalizeAdminChannel(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function isAllowedAdminChannel(channel) {
+  return ADMIN_CHANNEL_ALLOWLIST.has(channel);
 }
 
 function handleMessage(socket, data) {
@@ -155,6 +213,52 @@ function handleMessage(socket, data) {
     return;
   }
 
+  if (message?.type === 'subscribe_admin') {
+    if (!isAuthorizedAdmin(socket, message)) {
+      sendJson(socket, { type: 'error', message: 'Unauthorized' });
+      return;
+    }
+    const channel = normalizeAdminChannel(message.channel);
+    if (!channel) {
+      sendJson(socket, { type: 'error', message: 'Missing admin channel' });
+      return;
+    }
+    if (!isAllowedAdminChannel(channel)) {
+      sendJson(socket, {
+        type: 'error',
+        message: 'Unsupported admin channel',
+        details: { allowedChannels: Array.from(ADMIN_CHANNEL_ALLOWLIST) },
+      });
+      return;
+    }
+    socket.adminChannels.add(channel);
+    sendJson(socket, { type: 'subscribed_admin', channel });
+    return;
+  }
+
+  if (message?.type === 'unsubscribe_admin') {
+    if (!isAuthorizedAdmin(socket, message)) {
+      sendJson(socket, { type: 'error', message: 'Unauthorized' });
+      return;
+    }
+    const channel = normalizeAdminChannel(message.channel);
+    if (!channel) {
+      sendJson(socket, { type: 'error', message: 'Missing admin channel' });
+      return;
+    }
+    if (!isAllowedAdminChannel(channel)) {
+      sendJson(socket, {
+        type: 'error',
+        message: 'Unsupported admin channel',
+        details: { allowedChannels: Array.from(ADMIN_CHANNEL_ALLOWLIST) },
+      });
+      return;
+    }
+    socket.adminChannels.delete(channel);
+    sendJson(socket, { type: 'unsubscribed_admin', channel });
+    return;
+  }
+
   sendJson(socket, { type: 'error', message: 'Unsupported message type' });
 }
 
@@ -162,6 +266,7 @@ async function broadcastLocalizedCommentary(matchId, commentaryEntry, defaultQua
   const subscribers = matchSubscribers.get(matchId);
   if (!subscribers || subscribers.size === 0) return;
 
+  const queuedLocaleQuality = new Set();
   const fanoutTasks = [];
   for (const client of subscribers) {
     if (client.readyState !== WebSocket.OPEN) continue;
@@ -191,22 +296,21 @@ async function broadcastLocalizedCommentary(matchId, commentaryEntry, defaultQua
 
       if (!shouldQueueOnDemand) return;
 
-      const generated = await localizeCommentaryForLocale(commentaryEntry, {
+      const dedupeKey = `${commentaryEntry.id}:${locale}:${quality}`;
+      if (queuedLocaleQuality.has(dedupeKey)) return;
+      queuedLocaleQuality.add(dedupeKey);
+
+      enqueueCommentaryTranslationJob({
+        commentaryRow: commentaryEntry,
+        matchId,
         locale,
         quality,
-        includeSource: false,
-        allowOnDemand: true,
-      });
-
-      if (!generated.generated) return;
-      if (client.readyState !== WebSocket.OPEN) return;
-
-      sendJson(client, {
-        type: 'commentary_translation_ready',
-        commentaryId: commentaryEntry.id,
-        locale,
-        quality,
-        data: generated.payload,
+        onResolved: (resolvedPayload) => {
+          broadCastCommentaryTranslationReadyToSubscribers(matchId, resolvedPayload, {
+            locale,
+            quality,
+          });
+        },
       });
     })();
 
@@ -251,6 +355,14 @@ export function attachWebSocketServer(server) {
     }
 
     socket.subscriptions = new Map();
+    socket.adminChannels = new Set();
+    socket.adminToken = '';
+    try {
+      const requestUrl = new URL(req.url || '/ws', 'http://localhost');
+      socket.adminToken = String(requestUrl.searchParams.get('adminToken') || '').trim();
+    } catch {
+      socket.adminToken = '';
+    }
 
     sendJson(socket, { type: 'welcome' });
 
@@ -279,6 +391,10 @@ export function attachWebSocketServer(server) {
     void broadcastLocalizedCommentary(matchId, comment, options.quality);
   }
 
+  function broadCastCommentaryTranslationReady(matchId, payload, options = {}) {
+    broadCastCommentaryTranslationReadyToSubscribers(matchId, payload, options);
+  }
+
   function broadCastDataReset(metadata = {}) {
     const resetScope = metadata?.scope === 'commentary' ? 'commentary' : 'all';
     if (resetScope === 'all') {
@@ -301,5 +417,33 @@ export function attachWebSocketServer(server) {
     }
   }
 
-  return { broadCastMatchCreated, broadCastMatchUpdated, broadCastCommentary, broadCastDataReset };
+  function broadCastDemoStatus(status) {
+    broadCastToAll(wss, {
+      type: 'demo_status',
+      data: {
+        ...status,
+        at: new Date().toISOString(),
+      },
+    });
+  }
+
+  function broadCastTranslationHealth(data) {
+    broadCastToAdmins(wss, 'lingo', {
+      type: 'translation_health',
+      data: {
+        ...data,
+        at: new Date().toISOString(),
+      },
+    });
+  }
+
+  return {
+    broadCastMatchCreated,
+    broadCastMatchUpdated,
+    broadCastCommentary,
+    broadCastCommentaryTranslationReady,
+    broadCastDataReset,
+    broadCastDemoStatus,
+    broadCastTranslationHealth,
+  };
 }
